@@ -1,553 +1,542 @@
-/* =====================================================
-   QTA — HOSPITAL WEBSITE STYLE
-===================================================== */
-
-:root {
-  --primary: #0b6e69;
-  --primary-dark: #075451;
-  --primary-light: #e8f5f3;
-  --blue-light: #edf5fb;
-  --danger: #b42318;
-  --warning: #b54708;
-  --success: #067647;
-  --text: #182230;
-  --muted: #667085;
-  --border: #d0d5dd;
-  --bg: #f6f8fa;
-  --white: #ffffff;
-  --shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+*{
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
 }
 
-/* =====================================================
-   BASIC
-===================================================== */
-
-* {
-  box-sizing: border-box;
+:root{
+  --primary:#0b6b63;
+  --primary-dark:#07534d;
+  --primary-light:#e8f5f3;
+  --bg:#f5f8f8;
+  --card:#ffffff;
+  --text:#1d2a2a;
+  --muted:#6c7a7a;
+  --border:#dce5e4;
+  --danger:#c93d3d;
+  --danger-bg:#fff0f0;
+  --warning:#b97800;
+  --warning-bg:#fff8e7;
+  --success:#157347;
+  --success-bg:#eaf8f0;
+  --shadow:0 8px 30px rgba(20,50,50,.08);
 }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: Arial, Helvetica, sans-serif;
+body{
+  font-family:Arial,Helvetica,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.5;
 }
 
 button,
 input,
 textarea,
-select {
-  font: inherit;
+select{
+  font:inherit;
 }
 
-button {
-  cursor: pointer;
+button{
+  cursor:pointer;
 }
 
-#app {
-  width: min(1100px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 32px 0 60px;
+/* =========================
+   TOP BAR
+========================= */
+
+.topbar{
+  min-height:72px;
+  background:#fff;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px max(20px,calc((100% - 1180px)/2));
+  position:sticky;
+  top:0;
+  z-index:20;
 }
 
-/* =====================================================
-   HEADER / TOP BAR
-===================================================== */
-
-#bar {
-  min-height: 64px;
-  padding: 12px max(16px, calc((100vw - 1100px) / 2));
-  background: var(--white);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+.brand{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
 }
 
-.top-user {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-weight: 700;
+.logo{
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  display:grid;
+  place-items:center;
+  background:var(--primary);
+  color:#fff;
+  font-size:23px;
+  font-weight:800;
 }
 
-/* =====================================================
+.brand h2{
+  font-size:20px;
+  line-height:1.1;
+}
+
+.brand p{
+  color:var(--muted);
+  font-size:12px;
+}
+
+/* =========================
+   MAIN
+========================= */
+
+#app{
+  width:min(1180px,92%);
+  margin:0 auto;
+  padding:32px 0 60px;
+}
+
+/* =========================
    HERO
-===================================================== */
+========================= */
 
-.hero {
-  padding: 55px 24px 35px;
-  text-align: center;
+.hero{
+  text-align:center;
+  padding:45px 20px 35px;
 }
 
-.hero small {
-  color: var(--primary);
-  font-weight: 800;
-  letter-spacing: 1.5px;
+.hero small{
+  color:var(--primary);
+  font-weight:800;
+  letter-spacing:2px;
 }
 
-.hero h1 {
-  margin: 12px 0;
-  font-size: clamp(38px, 6vw, 70px);
-  line-height: 1.05;
+.hero h1{
+  margin-top:10px;
+  font-size:clamp(34px,6vw,64px);
+  line-height:1.05;
 }
 
-.hero h1 i {
-  color: var(--primary);
+.hero h1 i{
+  color:var(--primary);
+  font-style:normal;
 }
 
-.hero p {
-  max-width: 620px;
-  margin: 0 auto;
-  font-size: 18px;
+.hero p{
+  max-width:600px;
+  margin:18px auto;
 }
 
-/* =====================================================
-   GRID / CARDS
-===================================================== */
+/* =========================
+   GRID
+========================= */
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+.grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:20px;
 }
+
+.grid.two{
+  grid-template-columns:repeat(2,1fr);
+}
+
+/* =========================
+   CARD
+========================= */
 
 .card,
-.panel {
-  background: var(--white);
-  border: 1px solid #e4e7ec;
-  border-radius: 16px;
-  box-shadow: var(--shadow);
+.panel{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:24px;
+  box-shadow:var(--shadow);
 }
 
-.card {
-  padding: 22px;
-  margin-bottom: 16px;
+.role{
+  transition:.2s;
 }
 
-.role {
-  transition: 0.2s ease;
+.role:hover{
+  transform:translateY(-3px);
+  border-color:var(--primary);
 }
 
-.role:hover {
-  transform: translateY(-4px);
-  border-color: var(--primary);
+.role h2{
+  margin-bottom:8px;
 }
 
-.role h2 {
-  margin-top: 0;
+.case{
+  margin:14px 0;
 }
 
-/* =====================================================
+.case h3{
+  margin-bottom:8px;
+}
+
+.case-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:15px;
+}
+
+.case-info{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:12px;
+  margin-top:16px;
+}
+
+.info-box{
+  background:#f8fbfb;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px 12px;
+}
+
+.info-box small{
+  display:block;
+  color:var(--muted);
+  margin-bottom:3px;
+}
+
+.clickable{
+  cursor:pointer;
+  transition:.2s;
+}
+
+.clickable:hover{
+  border-color:var(--primary);
+  transform:translateY(-2px);
+}
+
+/* =========================
    BUTTONS
-===================================================== */
+========================= */
 
-.btn {
-  border: none;
-  background: var(--primary);
-  color: white;
-  padding: 11px 18px;
-  border-radius: 9px;
-  font-weight: 700;
-  margin-top: 12px;
-  transition: 0.2s ease;
+.btn{
+  border:0;
+  background:var(--primary);
+  color:#fff;
+  padding:11px 18px;
+  border-radius:10px;
+  font-weight:700;
+  margin-top:14px;
 }
 
-.btn:hover {
-  background: var(--primary-dark);
+.btn:hover{
+  background:var(--primary-dark);
 }
 
-.btn.alt {
-  background: #eef2f6;
-  color: var(--text);
+.btn.alt{
+  background:#fff;
+  color:var(--primary);
+  border:1px solid var(--primary);
 }
 
-.btn.alt:hover {
-  background: #dde3ea;
+.btn.alt:hover{
+  background:var(--primary-light);
 }
 
-.full {
-  width: 100%;
+.btn.danger{
+  background:var(--danger);
 }
 
-/* =====================================================
-   AUTH
-===================================================== */
-
-.auth {
-  width: min(560px, 100%);
-  margin: 35px auto;
-  padding: 28px;
+.btn.small{
+  padding:8px 12px;
+  font-size:13px;
+  margin-top:8px;
 }
 
-.login-title,
-.register-title {
-  font-weight: 800;
-  margin-bottom: 8px;
+.action-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
 }
 
-.auth-tabs {
-  display: flex;
-  gap: 10px;
-  margin: 22px 0;
+/* =========================
+   NAVIGATION
+========================= */
+
+.nav{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:26px;
+  padding-bottom:14px;
+  border-bottom:1px solid var(--border);
 }
 
-.auth-tabs button {
-  margin-top: 0;
+.nav button{
+  border:1px solid var(--border);
+  background:#fff;
+  color:var(--text);
+  padding:9px 14px;
+  border-radius:9px;
 }
 
-/* =====================================================
+.nav button:hover,
+.nav button.active{
+  background:var(--primary);
+  color:#fff;
+  border-color:var(--primary);
+}
+
+/* =========================
    FORMS
-===================================================== */
+========================= */
 
-.panel {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 28px;
+.auth{
+  width:min(560px,100%);
+  margin:25px auto;
 }
 
-.form-section {
-  margin-top: 15px;
+.form-title{
+  margin:15px 0 5px;
+  font-size:27px;
+  font-weight:800;
 }
 
-label {
-  display: block;
-  margin: 17px 0 7px;
-  font-weight: 700;
-  color: #344054;
+.form-subtitle{
+  color:var(--muted);
+  margin-bottom:20px;
+}
+
+label{
+  display:block;
+  font-weight:700;
+  margin:14px 0 6px;
 }
 
 input,
 textarea,
-select {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 12px 13px;
-  background: white;
-  color: var(--text);
-  outline: none;
+select{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:12px 13px;
+  background:#fff;
+  outline:none;
 }
 
 input:focus,
 textarea:focus,
-select:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(11, 110, 105, 0.12);
+select:focus{
+  border-color:var(--primary);
+  box-shadow:0 0 0 3px rgba(11,107,99,.1);
 }
 
-textarea {
-  min-height: 105px;
-  resize: vertical;
+textarea{
+  min-height:110px;
+  resize:vertical;
 }
 
-/* =====================================================
-   PASSWORD EYE
-===================================================== */
-
-.password-wrap {
-  position: relative;
+.password-wrap{
+  position:relative;
 }
 
-.password-wrap input {
-  padding-right: 50px;
+.password-wrap input{
+  padding-right:52px;
 }
 
-.eye-btn {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  border: none;
-  background: transparent;
-  font-size: 18px;
-  padding: 6px 8px;
+.eye-btn{
+  position:absolute;
+  right:8px;
+  top:50%;
+  transform:translateY(-50%);
+  border:0;
+  background:transparent;
+  font-size:18px;
+  padding:8px;
+  color:var(--muted);
 }
 
-/* =====================================================
-   NAVIGATION
-===================================================== */
-
-.nav {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 28px;
-  padding: 10px;
-  background: white;
-  border: 1px solid #e4e7ec;
-  border-radius: 13px;
+.tabs{
+  display:flex;
+  gap:8px;
+  margin:18px 0;
 }
 
-.nav button {
-  border: none;
-  background: transparent;
-  color: #475467;
-  font-weight: 700;
-  padding: 10px 14px;
-  border-radius: 8px;
+.tabs button{
+  flex:1;
+  border:1px solid var(--border);
+  background:#fff;
+  padding:10px;
+  border-radius:9px;
+  font-weight:700;
 }
 
-.nav button:hover {
-  background: var(--primary-light);
-  color: var(--primary);
+.tabs button.active{
+  background:var(--primary-light);
+  color:var(--primary-dark);
+  border-color:var(--primary);
 }
 
-/* =====================================================
-   CASES / HISTORY
-===================================================== */
-
-.case-card {
-  border-left: 4px solid var(--primary);
-}
-
-.clickable {
-  cursor: pointer;
-  transition: 0.2s ease;
-}
-
-.clickable:hover {
-  transform: translateY(-2px);
-  border-color: var(--primary);
-}
-
-.case-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.case-row h3 {
-  margin: 0 0 6px;
-}
-
-.case-row p {
-  margin: 0;
-}
-
-.details-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 11px 24px;
-  margin: 18px 0 8px;
-}
-
-.details-grid.large {
-  grid-template-columns: repeat(2, 1fr);
-}
-
-.details-grid span {
-  background: #f8fafc;
-  border: 1px solid #eaecf0;
-  padding: 10px 12px;
-  border-radius: 8px;
-}
-
-.history-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.history-tabs {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 16px 0 22px;
-}
-
-.history-tabs .btn {
-  margin-top: 0;
-}
-
-.section-gap {
-  margin-top: 12px;
-}
-
-/* =====================================================
-   RISK LEVELS
-===================================================== */
-
-.risk,
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 11px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.risk.LOW {
-  background: #e7f8ef;
-  color: var(--success);
-}
-
-.risk.MEDIUM {
-  background: #fff4e5;
-  color: var(--warning);
-}
-
-.risk.HIGH {
-  background: #fee4e2;
-  color: var(--danger);
-}
-
-.status-pill {
-  background: #eef2f6;
-  color: #475467;
-}
-
-/* =====================================================
+/* =========================
    NOTICES
-===================================================== */
+========================= */
 
-.notice {
-  margin-top: 14px;
-  padding: 14px;
-  border-radius: 10px;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  color: #9a3412;
-  line-height: 1.5;
+.notice{
+  padding:13px 15px;
+  margin-top:14px;
+  border-radius:10px;
+  background:var(--warning-bg);
+  color:#735200;
+  border:1px solid #f0dba5;
 }
 
-.muted {
-  color: var(--muted);
+.success-box{
+  padding:13px 15px;
+  margin:14px 0;
+  border-radius:10px;
+  background:var(--success-bg);
+  color:var(--success);
+  border:1px solid #bfe5cf;
 }
 
-.small {
-  font-size: 13px;
+.muted{
+  color:var(--muted);
 }
 
-.disclaimer-bottom {
-  text-align: center;
-  margin-top: 35px;
+.disclaimer{
+  margin-top:25px;
+  font-size:13px;
+  color:var(--muted);
+  text-align:center;
 }
 
-/* =====================================================
-   APPOINTMENTS
-===================================================== */
+/* =========================
+   RISK LABELS
+========================= */
 
-.appointment-card {
-  border-left: 4px solid #3478c5;
+.risk{
+  display:inline-block;
+  padding:5px 10px;
+  border-radius:20px;
+  font-size:12px;
+  font-weight:800;
 }
 
-.appointment-result {
-  text-align: center;
+.risk.LOW{
+  background:var(--success-bg);
+  color:var(--success);
 }
 
-.big-op {
-  font-size: 42px;
-  font-weight: 900;
-  color: var(--primary);
-  margin: 25px 0;
-  padding: 20px;
-  background: var(--primary-light);
-  border-radius: 14px;
+.risk.MEDIUM{
+  background:var(--warning-bg);
+  color:var(--warning);
 }
 
-/* =====================================================
-   DOCTOR
-===================================================== */
-
-.doctor-case {
-  border-top: 3px solid var(--primary);
+.risk.HIGH{
+  background:var(--danger-bg);
+  color:var(--danger);
 }
 
-.result-card {
-  margin-top: 22px;
-  border: 1px solid var(--border);
+/* =========================
+   APPOINTMENT
+========================= */
+
+.queue-box{
+  text-align:center;
+  padding:28px;
+  margin:18px 0;
+  background:var(--primary-light);
+  border-radius:18px;
 }
 
-.result-card h2 {
-  margin-top: 0;
+.queue-number{
+  font-size:48px;
+  font-weight:800;
+  color:var(--primary);
 }
 
-/* =====================================================
-   GENERAL
-===================================================== */
-
-hr {
-  border: none;
-  border-top: 1px solid #eaecf0;
-  margin: 28px 0;
+.op-number{
+  font-size:25px;
+  font-weight:800;
+  color:var(--primary);
 }
 
-h1,
-h2,
-h3 {
-  color: #182230;
-}
-
-h2 {
-  margin-top: 0;
-}
-
-small {
-  color: var(--muted);
-}
-
-/* =====================================================
+/* =========================
    TOAST
-===================================================== */
+========================= */
 
-#toast {
-  display: none;
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 1000;
-  background: #182230;
-  color: white;
-  padding: 13px 18px;
-  border-radius: 10px;
-  box-shadow: var(--shadow);
+.toast{
+  display:none;
+  position:fixed;
+  left:50%;
+  bottom:25px;
+  transform:translateX(-50%);
+  background:#1d2a2a;
+  color:#fff;
+  padding:13px 20px;
+  border-radius:10px;
+  z-index:100;
+  box-shadow:var(--shadow);
+  max-width:90%;
+  text-align:center;
 }
 
-/* =====================================================
-   MOBILE
-===================================================== */
+/* =========================
+   RESPONSIVE
+========================= */
 
-@media (max-width: 800px) {
-  .grid {
-    grid-template-columns: 1fr;
+@media(max-width:800px){
+
+  .grid,
+  .grid.two{
+    grid-template-columns:1fr;
   }
 
-  .details-grid,
-  .details-grid.large {
-    grid-template-columns: 1fr;
+  .topbar{
+    padding:10px 16px;
   }
 
-  #app {
-    width: min(100% - 20px, 1100px);
-    padding-top: 20px;
+  #app{
+    width:94%;
+    padding-top:22px;
   }
 
-  .panel,
-  .auth,
-  .card {
-    padding: 18px;
+  .hero{
+    padding:30px 10px;
   }
 
-  .nav {
-    gap: 4px;
+  .case-top{
+    flex-direction:column;
   }
 
-  .nav button {
-    padding: 9px 10px;
-    font-size: 13px;
+  .case-info{
+    grid-template-columns:1fr 1fr;
+  }
+}
+
+@media(max-width:500px){
+
+  .brand p{
+    display:none;
   }
 
-  .case-row {
-    flex-direction: column;
-    gap: 10px;
+  .logo{
+    width:38px;
+    height:38px;
   }
 
-  .hero {
-    padding-top: 30px;
+  .case-info{
+    grid-template-columns:1fr;
+  }
+
+  .card,
+  .panel{
+    padding:18px;
+  }
+
+  .nav{
+    gap:6px;
+  }
+
+  .nav button{
+    font-size:13px;
+    padding:8px 10px;
   }
 }
