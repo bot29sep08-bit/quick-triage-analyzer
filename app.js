@@ -8,48 +8,75 @@ const $ = id => document.getElementById(id);
 
 function toast(message) {
   const t = $("toast");
+  if (!t) return;
+
   t.textContent = message;
   t.style.display = "block";
 
-  setTimeout(() => {
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => {
     t.style.display = "none";
-  }, 3000);
+  }, 3500);
 }
 
 async function api(url, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: "Bearer " + token } : {})
+  };
+
   const response = await fetch(url, {
+    ...options,
     headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: "Bearer " + token } : {})
-    },
-    ...options
+      ...headers,
+      ...(options.headers || {})
+    }
   });
 
-  const data = await response.json();
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
 
   if (!response.ok) {
-    throw new Error(data.error || "Something went wrong");
+    throw new Error(data.error || "Something went wrong.");
   }
 
   return data;
 }
 
 function esc(value) {
-  return String(value ?? "").replace(/[&<>]/g, char => ({
+  return String(value ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
     "<": "&lt;",
-    ">": "&gt;"
-  }[char]));
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  }[c]));
+}
+
+function goHome() {
+  if (u) {
+    render();
+  } else {
+    home();
+  }
 }
 
 function logout() {
-  localStorage.clear();
+  localStorage.removeItem("qtaToken");
+  localStorage.removeItem("qtaUser");
+
   token = "";
   u = null;
-  render();
+
+  home();
 }
 
-function save(data) {
+function saveSession(data) {
   u = data.user;
   token = data.token;
 
@@ -59,50 +86,24 @@ function save(data) {
   render();
 }
 
-/* =====================================================
-   PASSWORD SHOW / HIDE
-===================================================== */
 
-function togglePassword(id, button) {
-  const input = $(id);
-
-  if (input.type === "password") {
-    input.type = "text";
-    button.textContent = "🙈";
-  } else {
-    input.type = "password";
-    button.textContent = "👁";
-  }
-}
-
-function passwordField(id = "password") {
-  return `
-    <div class="password-wrap">
-      <input id="${id}" type="password" placeholder="Enter password">
-      <button
-        type="button"
-        class="eye-btn"
-        onclick="togglePassword('${id}', this)"
-      >👁</button>
-    </div>
-  `;
-}
-
-/* =====================================================
+/* =========================================================
    MAIN RENDER
-===================================================== */
+========================================================= */
 
 function render() {
-  B.innerHTML = u
-    ? `
-      <div class="top-user">
-        <span>${esc(u.username)} · ${esc(u.role)}</span>
-        <button class="btn alt" onclick="logout()">Logout</button>
-      </div>
-    `
-    : `
+  if (!B) return;
+
+  if (u) {
+    B.innerHTML = `
+      <span>${esc(u.username || u.name || "")}</span>
+      <button class="btn alt small" onclick="logout()">Logout</button>
+    `;
+  } else {
+    B.innerHTML = `
       <button class="btn alt" onclick="auth()">Sign in</button>
     `;
+  }
 
   if (!u) {
     home();
@@ -113,19 +114,21 @@ function render() {
     patient();
   } else if (u.role === "nurse") {
     nurse();
-  } else {
+  } else if (u.role === "doctor") {
     doctor();
+  } else {
+    logout();
   }
 }
 
-/* =====================================================
-   OPENING HOME PAGE
-   KEEPING ORIGINAL STYLE
-===================================================== */
+
+/* =========================================================
+   OPENING PAGE
+========================================================= */
 
 function home() {
   A.innerHTML = `
-    <div class="hero">
+    <section class="hero">
       <small>ONE QUEUE. CLEAR CARE.</small>
 
       <h1>
@@ -133,47 +136,61 @@ function home() {
       </h1>
 
       <p class="muted">
-        One workflow connecting patients, nurses and doctors.
+        One simple workflow connecting patients, nurses and doctors.
       </p>
-    </div>
+    </section>
 
-    <div class="grid">
+    <section class="grid">
 
-      ${["patient", "nurse", "doctor"].map(role => `
-        <div
-          class="card role"
-          onclick="auth('${role}')"
-        >
-          <h2>
-            ${
-              role === "nurse"
-                ? "Nurse / Staff"
-                : role.charAt(0).toUpperCase() + role.slice(1)
-            }
-          </h2>
+      <div class="card role" onclick="auth('patient')">
+        <h2>Patient</h2>
 
-          <p class="muted">
-            Continue to your QTA workspace.
-          </p>
+        <p class="muted">
+          Register your visit, check your queue and manage appointments.
+        </p>
 
-          <button class="btn">
-            Continue
-          </button>
-        </div>
-      `).join("")}
+        <button class="btn">
+          Continue as Patient
+        </button>
+      </div>
 
-    </div>
+      <div class="card role" onclick="auth('nurse')">
+        <h2>Nurse / Staff</h2>
 
-    <p class="muted disclaimer-bottom">
-      QTA is a clinical decision-support system and does not replace
-      professional medical judgment or emergency medical care.
+        <p class="muted">
+          Manage patient registrations, OP queue and quick checkups.
+        </p>
+
+        <button class="btn">
+          Continue as Nurse
+        </button>
+      </div>
+
+      <div class="card role" onclick="auth('doctor')">
+        <h2>Doctor</h2>
+
+        <p class="muted">
+          Review priority patients, manage queues and patient documents.
+        </p>
+
+        <button class="btn">
+          Continue as Doctor
+        </button>
+      </div>
+
+    </section>
+
+    <p class="muted">
+      QTA is a clinical workflow support tool and does not replace
+      professional clinical judgment.
     </p>
   `;
 }
 
-/* =====================================================
-   LOGIN / REGISTER PAGE
-===================================================== */
+
+/* =========================================================
+   AUTH
+========================================================= */
 
 function auth(role = "patient") {
   const title =
@@ -184,30 +201,28 @@ function auth(role = "patient") {
   A.innerHTML = `
     <div class="auth card">
 
-      <button class="btn alt" onclick="home()">
+      <button class="btn alt small" onclick="home()">
         ← Back
       </button>
 
-      <h2 class="login-title">
-        ${title} Access
+      <h2 class="auth-title">
+        ${title}
       </h2>
 
-      <p class="muted">
-        Sign in to your QTA hospital workspace or create a new account.
+      <p class="auth-subtitle">
+        Secure access to your QTA workspace.
       </p>
 
       <div class="auth-tabs">
         <button
           class="btn alt"
-          onclick="authMode('login', '${role}')"
-        >
+          onclick="authMode('login','${role}')">
           Sign in
         </button>
 
         <button
-          class="btn"
-          onclick="authMode('register', '${role}')"
-        >
+          class="btn alt"
+          onclick="authMode('register','${role}')">
           New register
         </button>
       </div>
@@ -220,213 +235,302 @@ function auth(role = "patient") {
   authMode("login", role);
 }
 
-/* =====================================================
-   LOGIN / REGISTER FORMS
-===================================================== */
+
+function passwordField(id, label = "Password") {
+  return `
+    <label>${label}</label>
+
+    <div class="input-wrap">
+      <input
+        id="${id}"
+        type="password"
+        autocomplete="current-password"
+      />
+
+      <button
+        type="button"
+        class="eye-btn"
+        onclick="togglePassword('${id}', this)"
+        aria-label="Show password">
+        👁
+      </button>
+    </div>
+  `;
+}
+
+
+function togglePassword(id, button) {
+  const input = $(id);
+
+  if (!input) return;
+
+  if (input.type === "password") {
+    input.type = "text";
+    button.textContent = "🙈";
+  } else {
+    input.type = "password";
+    button.textContent = "👁";
+  }
+}
+
 
 function authMode(mode, role) {
-  const box = $("box");
+  if (!$("box")) return;
 
   if (mode === "login") {
 
-    const idLabel =
-      role === "patient"
-        ? "Unique Patient ID"
-        : role === "nurse"
-          ? "Unique Nurse ID"
-          : "Unique Doctor ID";
-
-    box.innerHTML = `
-      <h3 class="login-title">
-        ${role.charAt(0).toUpperCase() + role.slice(1)} Sign In
-      </h3>
-
-      <p class="muted">
-        Enter your account details to continue.
-      </p>
+    $("box").innerHTML = `
+      <div class="info-box">
+        Your username does not have to be unique.
+        Use your unique ${role} ID to identify your account.
+      </div>
 
       <label>Username</label>
-
       <input
         id="username"
-        placeholder="Enter username"
-      >
+        autocomplete="username"
+        placeholder="Enter your username"
+      />
 
-      <label>Password</label>
-
-      ${passwordField("password")}
-
-      <label>${idLabel}</label>
+      <label>
+        ${role === "patient"
+          ? "Unique Patient ID"
+          : role === "nurse"
+            ? "Unique Nurse ID"
+            : "Unique Doctor ID"}
+      </label>
 
       <input
         id="unique_id"
-        placeholder="Enter your 10 digit ID"
-        maxlength="10"
         inputmode="numeric"
-      >
+        placeholder="Enter your unique ID"
+      />
 
-      <button
-        class="btn full"
-        onclick="login('${role}')"
-      >
-        Sign in
-      </button>
+      ${passwordField("password")}
+
+      <div class="form-actions">
+        <button class="btn" onclick="login('${role}')">
+          Sign in
+        </button>
+      </div>
     `;
 
     return;
   }
 
-  let extra = "";
 
-  if (role === "patient") {
-    extra = `
-      <label>Age</label>
-
-      <input
-        id="age"
-        type="number"
-        min="0"
-        max="130"
-        placeholder="Enter age"
-      >
-    `;
-  }
-
-  if (role === "nurse" || role === "doctor") {
-    extra = `
+  const hospitalFields = role === "patient"
+    ? `
       <label>Hospital name</label>
-
       <input
         id="hospital_name"
-        placeholder="Enter working hospital name"
-      >
+        placeholder="Enter hospital name"
+      />
 
       <label>
         Hospital ID
-        <span class="muted small">
-          (first 2 letters + 2 digits)
-        </span>
+        <span class="muted">(optional)</span>
       </label>
 
       <input
         id="hospital_id"
         maxlength="4"
-        placeholder="Example: AP12"
-      >
+        placeholder="Optional"
+      />
+    `
+    : `
+      <label>Hospital name</label>
+      <input
+        id="hospital_name"
+        placeholder="Enter working hospital name"
+      />
+
+      <label>Hospital ID</label>
+      <input
+        id="hospital_id"
+        maxlength="4"
+        placeholder="Example: AP01"
+      />
+
+      <p class="muted">
+        Hospital ID must contain the first two letters of the
+        hospital name followed by two digits.
+      </p>
     `;
-  }
 
-  const roleTitle =
-    role === "nurse"
-      ? "Nurse / Staff"
-      : role.charAt(0).toUpperCase() + role.slice(1);
 
-  box.innerHTML = `
-    <h3 class="register-title">
-      Create ${roleTitle} Account
-    </h3>
+  $("box").innerHTML = `
+    <label>
+      ${role === "patient"
+        ? "Patient name"
+        : role === "nurse"
+          ? "Nurse name"
+          : "Doctor name"}
+    </label>
 
-    <p class="muted">
-      Your unique QTA ID will be created automatically.
-    </p>
+    <input
+      id="name"
+      placeholder="Enter full name"
+    />
 
     <label>Username</label>
 
     <input
       id="username"
-      placeholder="Choose a username"
-    >
-
-    <label>Password</label>
+      autocomplete="username"
+      placeholder="Username can be shared by different users"
+    />
 
     ${passwordField("password")}
 
-    <label>Mobile number</label>
-
+    <label>Mobile</label>
     <input
       id="mobile"
-      placeholder="Enter mobile number"
-    >
+      inputmode="tel"
+      placeholder="Mobile number"
+    />
 
-    <label>Email (optional)</label>
-
+    <label>Email <span class="muted">(optional)</span></label>
     <input
       id="email"
       type="email"
-      placeholder="Enter email"
-    >
+      placeholder="Email address"
+    />
 
-    ${extra}
+    ${role === "patient" ? `
+      <label>Age</label>
+      <input
+        id="age"
+        type="number"
+        min="0"
+        max="120"
+        placeholder="Age"
+      />
+    ` : ""}
 
-    <button
-      class="btn full"
-      onclick="reg('${role}')"
-    >
-      Create Account
-    </button>
+    ${hospitalFields}
+
+    <div class="form-actions">
+      <button class="btn" onclick="reg('${role}')">
+        Create account
+      </button>
+    </div>
   `;
 }
 
-/* =====================================================
-   LOGIN
-===================================================== */
+
+/* =========================================================
+   LOGIN / REGISTER
+========================================================= */
 
 async function login(role) {
   try {
-
     const data = await api("/api/auth/login", {
       method: "POST",
-
       body: JSON.stringify({
         role,
         username: $("username").value.trim(),
-        password: $("password").value,
-        unique_id: $("unique_id").value.trim()
+        unique_id: $("unique_id").value.trim(),
+        password: $("password").value
       })
     });
 
-    save(data);
+    saveSession(data);
 
   } catch (error) {
     toast(error.message);
   }
 }
 
-/* =====================================================
-   REGISTER
-===================================================== */
+
+function validateHospitalId(hospitalName, hospitalId, required = true) {
+  if (!hospitalId && !required) {
+    return true;
+  }
+
+  if (!hospitalId) {
+    toast("Hospital ID is required.");
+    return false;
+  }
+
+  const cleanName = hospitalName.trim().replace(/[^A-Za-z]/g, "");
+
+  if (cleanName.length < 2) {
+    toast("Enter a valid hospital name first.");
+    return false;
+  }
+
+  const expected = cleanName.substring(0, 2).toUpperCase();
+
+  const actual = hospitalId.trim().toUpperCase();
+
+  if (!/^[A-Z]{2}[0-9]{2}$/.test(actual)) {
+    toast("Hospital ID must contain 2 letters followed by 2 digits.");
+    return false;
+  }
+
+  if (actual.substring(0, 2) !== expected) {
+    toast(
+      `Hospital ID should start with ${expected}.`
+    );
+    return false;
+  }
+
+  return true;
+}
+
 
 async function reg(role) {
   try {
 
-    const body = {
-      role,
-      username: $("username").value.trim(),
-      password: $("password").value,
-      mobile: $("mobile").value.trim(),
-      email: $("email").value.trim()
-    };
+    const hospitalName =
+      $("hospital_name")?.value.trim() || "";
 
-    if (role === "patient") {
-      body.age = $("age").value;
-    } else {
-      body.hospital_name =
-        $("hospital_name").value.trim();
+    const hospitalId =
+      $("hospital_id")?.value.trim().toUpperCase() || "";
 
-      body.hospital_id =
-        $("hospital_id").value.trim().toUpperCase();
+    if (
+      !validateHospitalId(
+        hospitalName,
+        hospitalId,
+        role !== "patient"
+      )
+    ) {
+      return;
     }
 
     const data = await api("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify(body)
+
+      body: JSON.stringify({
+        role,
+
+        name: $("name").value.trim(),
+
+        username: $("username").value.trim(),
+
+        password: $("password").value,
+
+        mobile: $("mobile").value.trim(),
+
+        email: $("email").value.trim(),
+
+        age:
+          role === "patient"
+            ? $("age").value
+            : null,
+
+        hospital_name: hospitalName,
+
+        hospital_id:
+          hospitalId || null
+      })
     });
 
-    save(data);
+    saveSession(data);
 
     toast(
-      "Account created successfully. Your ID: " +
-      data.user.unique_id
+      `Account created. Your ${role} ID is ${data.user.unique_id}`
     );
 
   } catch (error) {
@@ -434,9 +538,10 @@ async function reg(role) {
   }
 }
 
-/* =====================================================
+
+/* =========================================================
    NAVIGATION
-===================================================== */
+========================================================= */
 
 function nav(items) {
   return `
@@ -452,148 +557,239 @@ function nav(items) {
   `;
 }
 
-/* =====================================================
-   PATIENT ACCOUNT
-===================================================== */
+
+/* =========================================================
+   PATIENT
+========================================================= */
 
 function patient() {
 
-  A.innerHTML = `
-    ${nav([
-      ["Home", "pform()"],
-      ["Take Appointment", "appointment()"],
+  A.innerHTML =
+    nav([
+      ["Home", "pHome()"],
+      ["New registration", "pform()"],
+      ["Take appointment", "appointment()"],
       ["History", "phistory()"],
       ["Help", "help()"],
       ["Profile", "profile()"]
-    ])}
+    ]) +
+    `<div id="c"></div>`;
 
-    <div id="c"></div>
-  `;
-
-  pform();
+  pHome();
 }
 
-/* =====================================================
-   PATIENT QUICK REGISTRATION
-===================================================== */
+
+function pHome() {
+
+  $("c").innerHTML = `
+    <section class="hero">
+
+      <small>PATIENT WORKSPACE</small>
+
+      <h1>
+        Welcome, ${esc(u.name || u.username)}.
+      </h1>
+
+      <p class="muted">
+        Register for care, check your queue or plan an appointment.
+      </p>
+
+    </section>
+
+    <div class="grid">
+
+      <div class="card role" onclick="pform()">
+        <h2>Quick registration</h2>
+        <p class="muted">
+          Register for today's hospital visit.
+        </p>
+        <button class="btn">
+          Register
+        </button>
+      </div>
+
+      <div class="card role" onclick="appointment()">
+        <h2>Take appointment</h2>
+        <p class="muted">
+          Join the estimated OP queue and wait at home.
+        </p>
+        <button class="btn">
+          Take appointment
+        </button>
+      </div>
+
+      <div class="card role" onclick="phistory()">
+        <h2>My history</h2>
+        <p class="muted">
+          View registrations, appointments and completed checkups.
+        </p>
+        <button class="btn">
+          View history
+        </button>
+      </div>
+
+    </div>
+  `;
+}
+
+
+/* =========================================================
+   PATIENT REGISTRATION
+========================================================= */
 
 function pform() {
 
   $("c").innerHTML = `
     <div class="panel">
 
-      <h2>Quick Registration</h2>
+      <h2>Quick registration</h2>
 
       <p class="muted">
-        Register your health concern for hospital assessment.
+        Enter the basic information needed for your hospital visit.
       </p>
 
       <label>Patient name</label>
-
       <input
         id="pn"
-        value="${esc(u.username)}"
-        placeholder="Enter patient name"
-      >
+        value="${esc(u.name || "")}"
+        placeholder="Patient name"
+      />
 
-      <label>Age</label>
+      <div class="form-row">
 
-      <input
-        id="pa"
-        type="number"
-        value="${esc(u.age || "")}"
-        min="0"
-        max="130"
-      >
+        <div>
+          <label>Age</label>
+          <input
+            id="pa"
+            type="number"
+            min="0"
+            max="120"
+            value="${esc(u.age || "")}"
+          />
+        </div>
 
-      <label>Describe your problem</label>
+        <div>
+          <label>Hospital name</label>
+          <input
+            id="phn"
+            value="${esc(u.hospital_name || "")}"
+            placeholder="Hospital name"
+          />
+        </div>
 
+      </div>
+
+      <label>Problem / reason for visit</label>
       <textarea
         id="pp"
-        placeholder="Describe your symptoms or health problem"
+        placeholder="Briefly describe the problem"
       ></textarea>
 
-      <label>Hospital name</label>
+      <label>Location</label>
 
-      <input
-        id="phname"
-        placeholder="Enter hospital name"
-      >
+      <select id="pl" onchange="toggleAwayDisclaimer()">
+
+        <option value="in_hospital">
+          In hospital
+        </option>
+
+        <option value="away">
+          Away from hospital
+        </option>
+
+      </select>
+
+      <div id="awayNotice" class="notice">
+
+        <b>Important:</b><br>
+
+        If you are away from the hospital and have severe pain,
+        are not fully conscious, or feel that your condition is
+        getting worse, seek immediate medical assessment.
+
+      </div>
 
       <label>
         Hospital ID
-        <span class="muted small">(optional)</span>
+        <span class="muted">(optional)</span>
       </label>
 
       <input
         id="ph"
         maxlength="4"
+        value="${esc(u.hospital_id || "")}"
         placeholder="Optional hospital ID"
-      >
+      />
 
-      <label>Your current location</label>
+      <div class="form-actions">
 
-      <select id="pl" onchange="locationNotice()">
-        <option value="in_hospital">
-          I am currently at the hospital
-        </option>
+        <button class="btn" onclick="pcase()">
+          Submit registration
+        </button>
 
-        <option value="away">
-          I am away from the hospital
-        </option>
-      </select>
+        <button class="btn alt" onclick="pHome()">
+          Cancel
+        </button>
 
-      <div id="awayNotice"></div>
-
-      <button
-        class="btn full"
-        onclick="pcase()"
-      >
-        Submit Registration
-      </button>
+      </div>
 
     </div>
   `;
-
-  locationNotice();
 }
 
-function locationNotice() {
 
-  const location = $("pl").value;
+function toggleAwayDisclaimer() {
 
-  $("awayNotice").innerHTML =
-    location === "away"
-      ? `
-        <div class="notice">
-          <b>Important:</b>
-          This registration does not replace emergency care.
-          If your symptoms are severe, worsening, or you are not fully
-          conscious, go to the hospital or seek emergency medical help
-          immediately.
-        </div>
-      `
-      : "";
+  const select = $("pl");
+  const notice = $("awayNotice");
+
+  if (!select || !notice) return;
+
+  notice.classList.toggle(
+    "show",
+    select.value === "away"
+  );
 }
+
 
 async function pcase() {
 
   try {
 
-    await api("/api/cases", {
+    const hospitalName =
+      $("phn").value.trim();
+
+    if (!hospitalName) {
+      toast("Please enter hospital name.");
+      return;
+    }
+
+    const data = await api("/api/cases", {
       method: "POST",
 
       body: JSON.stringify({
-        patient_name: $("pn").value.trim(),
-        age: $("pa").value,
-        problem: $("pp").value.trim(),
-        hospital_name: $("phname").value.trim(),
-        hospital_id: $("ph").value.trim().toUpperCase(),
-        location_status: $("pl").value
+
+        patient_name:
+          $("pn").value.trim(),
+
+        age:
+          $("pa").value,
+
+        problem:
+          $("pp").value.trim(),
+
+        location_status:
+          $("pl").value,
+
+        hospital_name:
+          hospitalName,
+
+        hospital_id:
+          $("ph").value.trim() || null
       })
     });
 
-    toast("Registration saved successfully");
+    toast("Registration saved.");
 
     phistory();
 
@@ -602,179 +798,10 @@ async function pcase() {
   }
 }
 
-/* =====================================================
-   APPOINTMENT
-===================================================== */
 
-function appointment() {
-
-  $("c").innerHTML = `
-    <div class="panel">
-
-      <h2>Take Appointment</h2>
-
-      <p class="muted">
-        Request a future hospital visit and receive an estimated queue time.
-      </p>
-
-      <label>Hospital name</label>
-
-      <input
-        id="aphname"
-        placeholder="Enter hospital name"
-      >
-
-      <label>
-        Hospital ID
-        <span class="muted small">(optional)</span>
-      </label>
-
-      <input
-        id="aphid"
-        maxlength="4"
-        placeholder="Optional hospital ID"
-      >
-
-      <button
-        class="btn full"
-        onclick="loadAppointmentQueue()"
-      >
-        Check Queue
-      </button>
-
-      <div id="appointmentBox"></div>
-
-    </div>
-  `;
-}
-
-async function loadAppointmentQueue() {
-
-  try {
-
-    const hospitalName =
-      $("aphname").value.trim();
-
-    const hospitalId =
-      $("aphid").value.trim().toUpperCase();
-
-    if (!hospitalName) {
-      toast("Please enter hospital name");
-      return;
-    }
-
-    const data = await api(
-      `/api/appointments/queue?hospital_name=${encodeURIComponent(hospitalName)}&hospital_id=${encodeURIComponent(hospitalId)}`
-    );
-
-    $("appointmentBox").innerHTML = `
-      <hr>
-
-      <div class="card appointment-card">
-
-        <h3>Current Queue</h3>
-
-        <p>
-          There are
-          <b>${data.before || 0}</b>
-          appointments before you.
-        </p>
-
-        <label>Preferred date</label>
-
-        <input
-          id="appointment_date"
-          type="date"
-        >
-
-        <label>Preferred time</label>
-
-        <input
-          id="appointment_time"
-          type="time"
-        >
-
-        <div class="notice">
-          Appointment time is an estimate only and may change depending
-          on patient conditions and hospital workflow.
-        </div>
-
-        <button
-          class="btn full"
-          onclick="createAppointment('${esc(hospitalName)}','${esc(hospitalId)}')"
-        >
-          Confirm Appointment Request
-        </button>
-
-      </div>
-    `;
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function createAppointment(hospitalName, hospitalId) {
-
-  try {
-
-    const data = await api("/api/appointments", {
-      method: "POST",
-
-      body: JSON.stringify({
-        hospital_name: hospitalName,
-        hospital_id: hospitalId,
-        preferred_date: $("appointment_date").value,
-        preferred_time: $("appointment_time").value
-      })
-    });
-
-    $("c").innerHTML = `
-      <div class="panel appointment-result">
-
-        <h2>Appointment Created</h2>
-
-        <p class="muted">
-          Your appointment queue number is
-        </p>
-
-        <div class="big-op">
-          OP ${data.op_number}
-        </div>
-
-        <p>
-          Patients before you:
-          <b>${data.before}</b>
-        </p>
-
-        <p>
-          Estimated waiting time:
-          <b>${data.estimated_minutes} minutes</b>
-        </p>
-
-        <div class="notice">
-          This time is an estimation. High-risk patients may be
-          prioritised and actual waiting time can change.
-        </div>
-
-        <button
-          class="btn"
-          onclick="phistory()"
-        >
-          View History
-        </button>
-
-      </div>
-    `;
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
+/* =========================================================
    PATIENT HISTORY
-===================================================== */
+========================================================= */
 
 async function phistory() {
 
@@ -782,823 +809,58 @@ async function phistory() {
 
     const data = await api("/api/cases/my");
 
-    const registrations =
-      data.filter(x => x.type !== "appointment");
+    const remaining =
+      data.filter(x =>
+        !["completed", "cancelled"].includes(
+          String(x.status || "").toLowerCase()
+        )
+      );
 
-    const appointments =
-      data.filter(x => x.type === "appointment");
-
-    $("c").innerHTML = `
-      <div class="history-head">
-        <div>
-          <h2>My History</h2>
-          <p class="muted">
-            View your registrations and appointments.
-          </p>
-        </div>
-      </div>
-
-      <div class="history-tabs">
-
-        <button
-          class="btn alt"
-          onclick="showHistoryRegistrations()"
-        >
-          Registrations
-        </button>
-
-        <button
-          class="btn alt"
-          onclick="showHistoryAppointments('remaining')"
-        >
-          Remaining OPs
-        </button>
-
-        <button
-          class="btn alt"
-          onclick="showHistoryAppointments('completed')"
-        >
-          Completed Checkups
-        </button>
-
-      </div>
-
-      <div id="historyContent"></div>
-    `;
-
-    window.qtaRegistrations = registrations;
-    window.qtaAppointments = appointments;
-
-    showHistoryRegistrations();
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-function formatDate(value) {
-
-  if (!value) return "";
-
-  const date = new Date(value);
-
-  if (isNaN(date.getTime())) return "";
-
-  return date.toLocaleString();
-}
-
-function showHistoryRegistrations() {
-
-  const list = window.qtaRegistrations || [];
-
-  $("historyContent").innerHTML =
-    list.length
-      ? list.map(x => `
-        <div
-          class="card case-card clickable"
-          onclick="caseDetails(${x.id})"
-        >
-
-          <div class="case-row">
-
-            <div>
-              <h3>${esc(x.patient_name)}</h3>
-
-              <p class="muted">
-                ${esc(x.hospital_name || "Hospital not available")}
-              </p>
-            </div>
-
-            ${
-              x.risk_level
-                ? `<span class="risk ${x.risk_level}">
-                    ${x.risk_level} RISK
-                  </span>`
-                : `<span class="status-pill">
-                    Waiting for checkup
-                  </span>`
-            }
-
-          </div>
-
-          <div class="details-grid">
-
-            <span>
-              <b>Age:</b> ${esc(x.age)}
-            </span>
-
-            <span>
-              <b>Status:</b>
-              ${esc(x.status || "Registered")}
-            </span>
-
-            ${
-              formatDate(x.updated_at)
-                ? `
-                  <span>
-                    <b>Registered:</b>
-                    ${formatDate(x.updated_at)}
-                  </span>
-                `
-                : ""
-            }
-
-          </div>
-
-        </div>
-      `).join("")
-      : `
-        <div class="card">
-          No registrations yet.
-        </div>
-      `;
-}
-
-function showHistoryAppointments(type) {
-
-  const list = (window.qtaAppointments || []).filter(x => {
-
-    if (type === "remaining") {
-      return !["completed", "cancelled"].includes(x.status);
-    }
-
-    return ["completed", "admitted"].includes(x.status);
-  });
-
-  $("historyContent").innerHTML =
-    list.length
-      ? list.map(x => `
-        <div class="card appointment-card clickable">
-
-          <div class="case-row">
-
-            <div>
-              <h3>OP ${x.op_number}</h3>
-
-              <p class="muted">
-                ${esc(x.hospital_name)}
-              </p>
-            </div>
-
-            <span class="status-pill">
-              ${esc(x.status)}
-            </span>
-
-          </div>
-
-          <div class="details-grid">
-
-            <span>
-              <b>Queue:</b>
-              ${esc(x.op_number)}
-            </span>
-
-            <span>
-              <b>Date:</b>
-              ${esc(x.preferred_date || "-")}
-            </span>
-
-            <span>
-              <b>Time:</b>
-              ${esc(x.preferred_time || "-")}
-            </span>
-
-          </div>
-
-        </div>
-      `).join("")
-      : `
-        <div class="card">
-          No appointments in this section.
-        </div>
-      `;
-}
-
-/* =====================================================
-   REGISTRATION DETAILS
-===================================================== */
-
-async function caseDetails(id) {
-
-  try {
-
-    const x = await api(`/api/cases/${id}`);
+    const completed =
+      data.filter(x =>
+        ["completed", "cancelled"].includes(
+          String(x.status || "").toLowerCase()
+        )
+      );
 
     $("c").innerHTML = `
-      <button
-        class="btn alt"
-        onclick="phistory()"
-      >
-        ← Back to History
-      </button>
 
-      <div class="panel section-gap">
-
-        <h2>Registration Details</h2>
-
-        <div class="details-grid large">
-
-          <span>
-            <b>Patient:</b>
-            ${esc(x.patient_name)}
-          </span>
-
-          <span>
-            <b>Age:</b>
-            ${esc(x.age)}
-          </span>
-
-          <span>
-            <b>Hospital:</b>
-            ${esc(x.hospital_name || "-")}
-          </span>
-
-          <span>
-            <b>Hospital ID:</b>
-            ${esc(x.hospital_id || "-")}
-          </span>
-
-          <span>
-            <b>Location:</b>
-            ${esc(x.location_status)}
-          </span>
-
-          <span>
-            <b>Status:</b>
-            ${esc(x.status || "Registered")}
-          </span>
-
-        </div>
-
-        <label>Problem</label>
-
-        <div class="card">
-          ${esc(x.problem)}
-        </div>
-
-        <hr>
-
-        <h3>Need Help?</h3>
-
-        <p class="muted">
-          Get help related to this registration without entering the
-          hospital details again.
-        </p>
-
-        <button
-          class="btn"
-          onclick="caseHelp(${x.id})"
-        >
-          Get Help for this Registration
-        </button>
-
-      </div>
-    `;
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   HELP
-===================================================== */
-
-function help() {
-
-  $("c").innerHTML = `
-    <div class="panel">
-
-      <h2>Help</h2>
+      <h2>My history</h2>
 
       <p class="muted">
-        Ask a question or request assistance.
+        Select a registration to see its full details.
       </p>
 
-      <label>Hospital name</label>
+      <div class="queue-section">
 
-      <input
-        id="helpHospital"
-        placeholder="Enter hospital name"
-      >
-
-      <label>Your message</label>
-
-      <textarea
-        id="helpMessage"
-        placeholder="Write your question or request"
-      ></textarea>
-
-      <button
-        class="btn full"
-        onclick="message()"
-      >
-        Send Help Request
-      </button>
-
-    </div>
-  `;
-}
-
-function caseHelp(caseId) {
-
-  $("c").innerHTML = `
-    <button
-      class="btn alt"
-      onclick="caseDetails(${caseId})"
-    >
-      ← Back
-    </button>
-
-    <div class="panel section-gap">
-
-      <h2>Help for Registration</h2>
-
-      <p class="muted">
-        Your hospital information is already linked to this registration.
-      </p>
-
-      <label>Your message</label>
-
-      <textarea
-        id="helpMessage"
-        placeholder="Describe what help you need"
-      ></textarea>
-
-      <button
-        class="btn full"
-        onclick="message(${caseId})"
-      >
-        Send Help Request
-      </button>
-
-    </div>
-  `;
-}
-
-async function message(caseId = null) {
-
-  try {
-
-    await api("/api/messages", {
-      method: "POST",
-
-      body: JSON.stringify({
-        hospital_name:
-          $("helpHospital")
-            ? $("helpHospital").value.trim()
-            : null,
-
-        message:
-          $("helpMessage").value.trim(),
-
-        case_id: caseId
-      })
-    });
-
-    toast("Help request sent");
-
-    if (caseId) {
-      caseDetails(caseId);
-    } else {
-      help();
-    }
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   PROFILE
-===================================================== */
-
-function profile() {
-
-  const hospitalDetails =
-    u.role !== "patient"
-      ? `
-        <label>Hospital name</label>
-
-        <input
-          id="profile_hospital_name"
-          value="${esc(u.hospital_name || "")}"
-        >
-
-        <label>Hospital ID</label>
-
-        <input
-          id="profile_hospital_id"
-          value="${esc(u.hospital_id || "")}"
-          maxlength="4"
-        >
-      `
-      : `
-        <label>Age</label>
-
-        <input
-          id="profile_age"
-          type="number"
-          value="${esc(u.age || "")}"
-          min="0"
-          max="130"
-        >
-      `;
-
-  $("c").innerHTML = `
-    <div class="panel">
-
-      <h2>My Profile</h2>
-
-      <p class="muted">
-        You can update your basic account information.
-      </p>
-
-      <div class="card">
-
-        <p>
-          <b>QTA ID:</b>
-          ${esc(u.unique_id)}
-        </p>
-
-        <p>
-          <b>Role:</b>
-          ${esc(u.role)}
-        </p>
-
-      </div>
-
-      <label>Username</label>
-
-      <input
-        id="profile_username"
-        value="${esc(u.username || "")}"
-      >
-
-      <label>Mobile</label>
-
-      <input
-        id="profile_mobile"
-        value="${esc(u.mobile || "")}"
-      >
-
-      <label>Email</label>
-
-      <input
-        id="profile_email"
-        type="email"
-        value="${esc(u.email || "")}"
-      >
-
-      ${hospitalDetails}
-
-      <button
-        class="btn full"
-        onclick="saveProfile()"
-      >
-        Save Changes
-      </button>
-
-      <p class="muted small">
-        Your unique QTA ID cannot be changed.
-      </p>
-
-    </div>
-  `;
-}
-
-async function saveProfile() {
-
-  try {
-
-    const body = {
-      username:
-        $("profile_username").value.trim(),
-
-      mobile:
-        $("profile_mobile").value.trim(),
-
-      email:
-        $("profile_email").value.trim()
-    };
-
-    if (u.role === "patient") {
-      body.age = $("profile_age").value;
-    } else {
-      body.hospital_name =
-        $("profile_hospital_name").value.trim();
-
-      body.hospital_id =
-        $("profile_hospital_id").value.trim().toUpperCase();
-    }
-
-    const data = await api("/api/profile", {
-      method: "PUT",
-      body: JSON.stringify(body)
-    });
-
-    u = data.user;
-
-    localStorage.qtaUser = JSON.stringify(u);
-
-    toast("Profile updated");
-
-    profile();
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   NURSE ACCOUNT
-===================================================== */
-
-function nurse() {
-
-  A.innerHTML = `
-    ${nav([
-      ["Patient Registrations", "nlist()"],
-      ["Appointments / OPs", "nappointments()"],
-      ["Messages", "nmsg()"],
-      ["History", "nhistory()"],
-      ["Profile", "profile()"]
-    ])}
-
-    <div id="c"></div>
-  `;
-
-  nlist();
-}
-
-/* =====================================================
-   NURSE PATIENT REGISTRATIONS
-===================================================== */
-
-async function nlist() {
-
-  try {
-
-    const list = await api("/api/cases");
-
-    $("c").innerHTML = `
-      <h2>Patient Registrations</h2>
-
-      ${
-        list.length
-          ? list.map(v => `
-            <div class="card case-card">
-
-              <div class="case-row">
-
-                <div>
-                  <h3>${esc(v.patient_name)}</h3>
-
-                  <p class="muted">
-                    Patient ID: ${esc(v.patient_id)}
-                  </p>
-                </div>
-
-                ${
-                  v.risk_level
-                    ? `
-                      <span class="risk ${v.risk_level}">
-                        ${v.risk_level} RISK
-                      </span>
-                    `
-                    : `
-                      <span class="status-pill">
-                        Waiting
-                      </span>
-                    `
-                }
-
-              </div>
-
-              <p>
-                ${esc(v.problem)}
-              </p>
-
-              <button
-                class="btn"
-                onclick="check(${v.id})"
-              >
-                Quick Checkup
-              </button>
-
-            </div>
-          `).join("")
-          : `
-            <div class="card">
-              No patient registrations.
-            </div>
-          `
-      }
-    `;
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   NURSE APPOINTMENTS
-===================================================== */
-
-async function nappointments() {
-
-  try {
-
-    const list = await api("/api/appointments");
-
-    $("c").innerHTML = `
-      <h2>Appointments / OP Queue</h2>
-
-      ${
-        list.length
-          ? list.map(x => `
-            <div class="card appointment-card">
-
-              <div class="case-row">
-
-                <div>
-                  <h3>OP ${esc(x.op_number)}</h3>
-
-                  <p class="muted">
-                    Patient: ${esc(x.patient_name || x.patient_id)}
-                  </p>
-                </div>
-
-                <span class="status-pill">
-                  ${esc(x.status)}
-                </span>
-
-              </div>
-
-              <div class="details-grid">
-
-                <span>
-                  <b>Date:</b>
-                  ${esc(x.preferred_date || "-")}
-                </span>
-
-                <span>
-                  <b>Time:</b>
-                  ${esc(x.preferred_time || "-")}
-                </span>
-
-              </div>
-
-              <button
-                class="btn"
-                onclick="checkAppointment(${x.id})"
-              >
-                Check Patient
-              </button>
-
-            </div>
-          `).join("")
-          : `
-            <div class="card">
-              No appointments waiting.
-            </div>
-          `
-      }
-    `;
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   NURSE VITAL CHECKUP
-===================================================== */
-
-async function check(id) {
-
-  $("c").innerHTML = `
-    <div class="panel">
-
-      <button
-        class="btn alt"
-        onclick="nlist()"
-      >
-        ← Back
-      </button>
-
-      <h2>Six Vital Measurements</h2>
-
-      <label>Respiration rate</label>
-      <input id="rr" type="number">
-
-      <label>SpO₂</label>
-      <input id="spo2" type="number">
-
-      <label>Systolic blood pressure</label>
-      <input id="sbp" type="number">
-
-      <label>Heart rate</label>
-      <input id="hr" type="number">
-
-      <label>Consciousness</label>
-
-      <select id="con">
-        <option>Alert</option>
-        <option>Voice</option>
-        <option>Pain</option>
-        <option>Unresponsive</option>
-        <option>New confusion</option>
-      </select>
-
-      <label>Temperature °C</label>
-
-      <input
-        id="temp"
-        type="number"
-        step="0.1"
-      >
-
-      <button
-        class="btn full"
-        onclick="triage(${id})"
-      >
-        Analyze
-      </button>
-
-      <div id="result"></div>
-
-    </div>
-  `;
-}
-
-async function checkAppointment(id) {
-  check(id);
-}
-
-/* =====================================================
-   TRIAGE
-===================================================== */
-
-async function triage(id) {
-
-  try {
-
-    const data = await api(
-      "/api/cases/" + id + "/triage",
-      {
-        method: "POST",
-
-        body: JSON.stringify({
-          rr: $("rr").value,
-          spo2: $("spo2").value,
-          sbp: $("sbp").value,
-          heart_rate: $("hr").value,
-          consciousness: $("con").value,
-          temperature: $("temp").value
-        })
-      }
-    );
-
-    $("result").innerHTML = `
-      <div class="card result-card case ${data.risk}">
-
-        <h2>
-          <span class="risk ${data.risk}">
-            ${data.risk} RISK
-          </span>
+        <h2 class="normal-title">
+          Remaining / Active
         </h2>
 
-        <p>
-          <b>Risk Score:</b>
-          ${data.score}
-        </p>
+        ${
+          remaining.length
+            ? remaining.map(historyCard).join("")
+            : emptyState(
+                "No active registrations",
+                "Your current registrations will appear here."
+              )
+        }
 
-        <p>
-          ${
-            data.risk === "LOW"
-              ? "Routine monitoring and standard clinical assessment."
-              : data.risk === "MEDIUM"
-                ? "Urgent clinical review is recommended."
-                : "High-risk alert. Patient should be prioritised for doctor review."
-          }
-        </p>
+      </div>
+
+      <div class="queue-section">
+
+        <h2>
+          Completed / Checkups
+        </h2>
 
         ${
-          data.risk !== "HIGH"
-            ? `
-              <button
-                class="btn"
-                onclick="transfer(${id})"
-              >
-                Transfer to Doctor
-              </button>
-            `
-            : `
-              <p class="notice">
-                High-risk patient has been prioritised for doctor review.
-              </p>
-            `
+          completed.length
+            ? completed.map(historyCard).join("")
+            : emptyState(
+                "No completed visits",
+                "Completed checkups will appear here."
+              )
         }
 
       </div>
@@ -1609,321 +871,213 @@ async function triage(id) {
   }
 }
 
-async function transfer(id) {
 
-  try {
+function historyCard(item) {
 
-    await api(
-      "/api/cases/" + id + "/transfer",
-      {
-        method: "POST"
-      }
+  const date =
+    formatDate(
+      item.created_at ||
+      item.registration_date ||
+      item.updated_at
     );
 
-    toast("Patient transferred to doctor");
+  const status =
+    item.status ||
+    "Waiting";
 
-    nlist();
+  return `
+    <div
+      class="card case ${esc(item.risk_level || "")}"
+      onclick="showPatientCase(${Number(item.id)})"
+      style="cursor:pointer"
+    >
 
-  } catch (error) {
-    toast(error.message);
-  }
-}
+      <div class="case-header">
 
-/* =====================================================
-   NURSE MESSAGES / HISTORY
-===================================================== */
+        <div>
 
-async function nmsg() {
+          <div class="case-title">
+            ${esc(item.patient_name || u.name)}
+          </div>
 
-  try {
+          <div class="case-meta">
 
-    const list = await api("/api/messages");
+            <span>
+              Hospital:
+              <b>${esc(
+                item.hospital_name ||
+                u.hospital_name ||
+                "Not specified"
+              )}</b>
+            </span>
 
-    $("c").innerHTML = `
-      <h2>Patient Help Requests</h2>
+            <span>
+              Registered:
+              ${esc(date)}
+            </span>
 
-      ${
-        list.length
-          ? list.map(m => `
-            <div class="card">
+          </div>
 
-              <b>
-                ${esc(m.username || "Patient")}
-              </b>
+        </div>
 
-              <p class="muted">
-                ${esc(m.unique_id || "")}
-              </p>
+        ${
+          item.risk_level
+            ? `
+              <span class="risk ${esc(item.risk_level)}">
+                ${esc(item.risk_level)} RISK
+              </span>
+            `
+            : ""
+        }
 
-              <p>
-                ${esc(m.message)}
-              </p>
+      </div>
 
-            </div>
-          `).join("")
-          : `
-            <div class="card">
-              No messages.
-            </div>
-          `
-      }
-    `;
+      <p class="case-description">
+        ${esc(item.problem || "No problem description")}
+      </p>
 
-  } catch (error) {
-    toast(error.message);
-  }
-}
+      <div class="case-meta">
 
-async function nhistory() {
+        <span>
+          Status:
+          <b>${esc(status)}</b>
+        </span>
 
-  try {
+        ${
+          item.op_number
+            ? `
+              <span>
+                OP:
+                <b>#${esc(item.op_number)}</b>
+              </span>
+            `
+            : ""
+        }
 
-    const list = await api("/api/history");
+      </div>
 
-    $("c").innerHTML = `
-      <h2>Hospital History</h2>
-
-      ${
-        list.length
-          ? list.map(caseCard).join("")
-          : `
-            <div class="card">
-              No history.
-            </div>
-          `
-      }
-    `;
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   DOCTOR ACCOUNT
-===================================================== */
-
-function doctor() {
-
-  A.innerHTML = `
-    ${nav([
-      ["High Risk Queue", "dqueue('high')"],
-      ["Normal Queue", "dqueue('normal')"],
-      ["Hospital Risk Settings", "dsettings()"],
-      ["History", "dhistory()"],
-      ["Profile", "profile()"]
-    ])}
-
-    <div id="c"></div>
+    </div>
   `;
-
-  dqueue("high");
 }
 
-/* =====================================================
-   DOCTOR QUEUE
-===================================================== */
 
-async function dqueue(type = "high") {
+async function showPatientCase(id) {
 
   try {
 
-    const list = await api(
-      `/api/doctor/queue?type=${type}`
-    );
-
-    const title =
-      type === "high"
-        ? "High Risk Patient Queue"
-        : "Normal Patient Queue";
+    const item = await api(`/api/cases/${id}`);
 
     $("c").innerHTML = `
-      <h2>${title}</h2>
 
-      ${
-        list.length
-          ? list.map(v => `
-            <div class="card doctor-case">
+      <button
+        class="btn alt small"
+        onclick="phistory()">
+        ← Back to history
+      </button>
 
-              <div class="case-row">
+      <div class="panel" style="margin-top:18px">
 
-                <div>
-                  <h3>${esc(v.patient_name)}</h3>
+        <div class="case-header">
 
-                  <p class="muted">
-                    Patient ID: ${esc(v.patient_id)}
-                  </p>
+          <div>
+            <h2>
+              Registration details
+            </h2>
+
+            <p class="muted">
+              Complete information for this visit.
+            </p>
+          </div>
+
+          ${
+            item.risk_level
+              ? `
+                <span class="risk ${esc(item.risk_level)}">
+                  ${esc(item.risk_level)} RISK
+                </span>
+              `
+              : ""
+          }
+
+        </div>
+
+        <div class="profile-grid">
+
+          <div class="profile-item">
+            <small>Patient</small>
+            <b>${esc(item.patient_name || u.name)}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Age</small>
+            <b>${esc(item.age || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Hospital</small>
+            <b>${esc(item.hospital_name || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Hospital ID</small>
+            <b>${esc(item.hospital_id || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Registration date</small>
+            <b>${esc(
+              formatDate(
+                item.created_at ||
+                item.registration_date
+              )
+            )}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Status</small>
+            <b>${esc(item.status || "Waiting")}</b>
+          </div>
+
+          ${
+            item.op_number
+              ? `
+                <div class="profile-item">
+                  <small>OP number</small>
+                  <b>#${esc(item.op_number)}</b>
                 </div>
+              `
+              : ""
+          }
 
-                ${
-                  v.risk_level
-                    ? `
-                      <span class="risk ${v.risk_level}">
-                        ${v.risk_level} RISK
-                      </span>
-                    `
-                    : ""
-                }
+          ${
+            item.news_score !== undefined &&
+            item.news_score !== null
+              ? `
+                <div class="profile-item">
+                  <small>Triage score</small>
+                  <b>${esc(item.news_score)}</b>
+                </div>
+              `
+              : ""
+          }
 
-              </div>
+        </div>
 
-              <p>
-                ${esc(v.problem)}
-              </p>
+        <label>Problem / reason</label>
 
-              <p>
-                <b>Risk Score:</b>
-                ${esc(v.news_score ?? "-")}
-              </p>
+        <div class="info-box">
+          ${esc(item.problem || "Not provided")}
+        </div>
 
-              <label>Patient Status</label>
+        <div class="form-actions">
 
-              <select id="s${v.id}">
+          <button
+            class="btn"
+            onclick="caseHelp(${Number(item.id)})">
+            Help for this registration
+          </button>
 
-                <option value="under_review">
-                  Under review
-                </option>
-
-                <option value="completed">
-                  Completed
-                </option>
-
-                <option value="admitted">
-                  Admitted
-                </option>
-
-                <option value="follow_up">
-                  Follow-up
-                </option>
-
-              </select>
-
-              <label>Doctor Notes</label>
-
-              <textarea
-                id="notes${v.id}"
-                placeholder="Add clinical notes"
-              ></textarea>
-
-              <label>Medical Slip / Prescription</label>
-
-              <textarea
-                id="slip${v.id}"
-                placeholder="Enter medication or treatment instructions"
-              ></textarea>
-
-              <button
-                class="btn"
-                onclick="doctorUpdate(${v.id})"
-              >
-                Save Patient Update
-              </button>
-
-            </div>
-          `).join("")
-          : `
-            <div class="card">
-              No patients waiting.
-            </div>
-          `
-      }
-    `;
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   DOCTOR UPDATE
-===================================================== */
-
-async function doctorUpdate(id) {
-
-  try {
-
-    await api(
-      "/api/cases/" + id + "/status",
-      {
-        method: "POST",
-
-        body: JSON.stringify({
-          status: $("s" + id).value,
-
-          doctor_notes:
-            $("notes" + id).value.trim(),
-
-          medical_slip:
-            $("slip" + id).value.trim()
-        })
-      }
-    );
-
-    toast("Patient record updated");
-
-    dqueue("high");
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* =====================================================
-   DOCTOR RISK SETTINGS
-===================================================== */
-
-async function dsettings() {
-
-  try {
-
-    const s = await api("/api/settings");
-
-    $("c").innerHTML = `
-      <div class="panel">
-
-        <h2>Hospital Risk Settings</h2>
-
-        <p class="muted">
-          These settings apply only to your hospital.
-          Only doctors can modify them.
-        </p>
-
-        <label>Low risk maximum score</label>
-
-        <input
-          id="low"
-          value="${esc(s.low_max)}"
-          type="number"
-        >
-
-        <label>Medium risk maximum score</label>
-
-        <input
-          id="med"
-          value="${esc(s.medium_max)}"
-          type="number"
-        >
-
-        <label>
-          Medium risk review time (minutes)
-        </label>
-
-        <input
-          id="min"
-          value="${esc(s.medium_review_minutes)}"
-          type="number"
-        >
-
-        <button
-          class="btn full"
-          onclick="saveset()"
-        >
-          Save Hospital Settings
-        </button>
-
-        <p class="muted small">
-          Default values: Low ≤ 4, Medium 5–6, High ≥ 7.
-        </p>
+        </div>
 
       </div>
     `;
@@ -1932,6 +1086,1597 @@ async function dsettings() {
     toast(error.message);
   }
 }
+
+
+/* =========================================================
+   PATIENT HELP
+========================================================= */
+
+function help() {
+
+  $("c").innerHTML = `
+
+    <div class="panel">
+
+      <h2>Help</h2>
+
+      <p class="muted">
+        Choose how you need help.
+      </p>
+
+      <div class="grid">
+
+        <div class="card role" onclick="generalHelp()">
+
+          <h2>Hospital help</h2>
+
+          <p class="muted">
+            Ask a general question about a hospital.
+          </p>
+
+          <button class="btn">
+            Get help
+          </button>
+
+        </div>
+
+        <div class="card role" onclick="phistory()">
+
+          <h2>Registration help</h2>
+
+          <p class="muted">
+            Open one of your registrations and ask for help
+            directly about that visit.
+          </p>
+
+          <button class="btn">
+            Choose registration
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+function generalHelp() {
+
+  $("c").innerHTML = `
+
+    <div class="panel">
+
+      <h2>Hospital help</h2>
+
+      <label>Hospital name</label>
+
+      <input
+        id="helpHospital"
+        placeholder="Enter hospital name"
+      />
+
+      <label>Your question</label>
+
+      <textarea
+        id="helpMessage"
+        placeholder="How can we help?"
+      ></textarea>
+
+      <div class="form-actions">
+
+        <button
+          class="btn"
+          onclick="sendGeneralHelp()">
+          Send help request
+        </button>
+
+        <button
+          class="btn alt"
+          onclick="help()">
+          Back
+        </button>
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+async function sendGeneralHelp() {
+
+  try {
+
+    await api("/api/messages", {
+      method: "POST",
+
+      body: JSON.stringify({
+
+        hospital_name:
+          $("helpHospital").value.trim(),
+
+        message:
+          $("helpMessage").value.trim()
+      })
+    });
+
+    toast("Help request sent.");
+
+    help();
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function caseHelp(caseId) {
+
+  try {
+
+    const item =
+      await api(`/api/cases/${caseId}`);
+
+    $("c").innerHTML = `
+
+      <div class="panel">
+
+        <button
+          class="btn alt small"
+          onclick="showPatientCase(${Number(caseId)})">
+          ← Back
+        </button>
+
+        <h2 style="margin-top:18px">
+          Help for this registration
+        </h2>
+
+        <div class="info-box">
+
+          <b>Hospital:</b>
+          ${esc(item.hospital_name || "-")}
+
+          <br>
+
+          <b>Registration:</b>
+          ${esc(
+            formatDate(
+              item.created_at ||
+              item.registration_date
+            )
+          )}
+
+        </div>
+
+        <label>Your message</label>
+
+        <textarea
+          id="caseHelpMessage"
+          placeholder="Describe what you need help with"
+        ></textarea>
+
+        <div class="form-actions">
+
+          <button
+            class="btn"
+            onclick="sendCaseHelp(${Number(caseId)})">
+            Send help request
+          </button>
+
+        </div>
+
+      </div>
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function sendCaseHelp(caseId) {
+
+  try {
+
+    await api("/api/messages", {
+      method: "POST",
+
+      body: JSON.stringify({
+
+        case_id: caseId,
+
+        message:
+          $("caseHelpMessage").value.trim()
+      })
+    });
+
+    toast("Help request sent.");
+
+    showPatientCase(caseId);
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+/* =========================================================
+   PATIENT APPOINTMENT
+========================================================= */
+
+async function appointment() {
+
+  try {
+
+    const queue =
+      await api("/api/appointments/estimate");
+
+    $("c").innerHTML = `
+
+      <div class="appointment-card">
+
+        <h2>Take appointment</h2>
+
+        <p class="muted">
+          You can take an OP appointment and wait at home.
+        </p>
+
+        <label>Hospital name</label>
+
+        <input
+          id="appHospital"
+          value="${esc(u.hospital_name || "")}"
+          placeholder="Enter hospital name"
+        />
+
+        <label>
+          Hospital ID
+          <span class="muted">(optional)</span>
+        </label>
+
+        <input
+          id="appHospitalId"
+          value="${esc(u.hospital_id || "")}"
+          maxlength="4"
+          placeholder="Optional"
+        />
+
+        <div class="queue-info">
+
+          <div class="queue-stat">
+            <small>Patients before you</small>
+            <b>${esc(queue.before_you ?? 0)}</b>
+          </div>
+
+          <div class="queue-stat">
+            <small>Estimated wait</small>
+            <b>${esc(queue.estimated_minutes ?? 0)} min</b>
+          </div>
+
+          <div class="queue-stat">
+            <small>Next OP number</small>
+            <b>#${esc(queue.next_op_number ?? "-")}</b>
+          </div>
+
+        </div>
+
+        <div class="info-box">
+
+          The waiting time is an <b>estimate</b>, not an exact
+          appointment time. Patient conditions and hospital
+          workload can change the actual waiting time.
+
+        </div>
+
+        <label>Preferred date</label>
+
+        <input
+          id="appDate"
+          type="date"
+        />
+
+        <label>Preferred time</label>
+
+        <input
+          id="appTime"
+          type="time"
+        />
+
+        <div class="form-actions">
+
+          <button
+            class="btn"
+            onclick="createAppointment()">
+            Confirm appointment
+          </button>
+
+        </div>
+
+      </div>
+    `;
+
+    setMinimumAppointmentDate();
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+function setMinimumAppointmentDate() {
+
+  const input = $("appDate");
+
+  if (!input) return;
+
+  const now = new Date();
+
+  const yyyy =
+    now.getFullYear();
+
+  const mm =
+    String(now.getMonth() + 1).padStart(2, "0");
+
+  const dd =
+    String(now.getDate()).padStart(2, "0");
+
+  input.min =
+    `${yyyy}-${mm}-${dd}`;
+
+  input.value =
+    `${yyyy}-${mm}-${dd}`;
+}
+
+
+async function createAppointment() {
+
+  try {
+
+    const date =
+      $("appDate").value;
+
+    const time =
+      $("appTime").value;
+
+    if (!date || !time) {
+      toast("Please choose date and time.");
+      return;
+    }
+
+    const data =
+      await api("/api/appointments", {
+        method: "POST",
+
+        body: JSON.stringify({
+
+          hospital_name:
+            $("appHospital").value.trim(),
+
+          hospital_id:
+            $("appHospitalId").value.trim() || null,
+
+          requested_date:
+            date,
+
+          requested_time:
+            time
+        })
+      });
+
+    $("c").innerHTML = `
+
+      <div class="appointment-card">
+
+        <div class="success-box">
+
+          <h2>Appointment created</h2>
+
+          <p>
+            Your OP number is:
+          </p>
+
+          <div class="queue-number">
+            #${esc(data.op_number)}
+          </div>
+
+          <p>
+            Patients before you:
+            <b>${esc(data.before_you)}</b>
+          </p>
+
+          <p>
+            Estimated waiting time:
+            <b>${esc(data.estimated_minutes)} minutes</b>
+          </p>
+
+        </div>
+
+        <div class="warning-box">
+
+          The displayed time is only an estimate.
+          Actual waiting time may change depending on
+          patient conditions and hospital workload.
+
+        </div>
+
+        <button
+          class="btn"
+          onclick="phistory()">
+          View history
+        </button>
+
+      </div>
+    `;
+
+    toast("Appointment created.");
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+/* =========================================================
+   PATIENT PROFILE
+========================================================= */
+
+async function profile() {
+
+  try {
+
+    const data =
+      await api("/api/profile");
+
+    const profileData =
+      data.user || data;
+
+    $("c").innerHTML = `
+
+      <div class="panel">
+
+        <h2>My profile</h2>
+
+        <p class="muted">
+          Review your details. Your unique ID cannot be changed.
+        </p>
+
+        <div class="profile-grid">
+
+          <div class="profile-item">
+            <small>Unique ID</small>
+            <b>${esc(profileData.unique_id || u.unique_id)}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Role</small>
+            <b>${esc(profileData.role || u.role)}</b>
+          </div>
+
+        </div>
+
+        <label>Name</label>
+
+        <input
+          id="profileName"
+          value="${esc(profileData.name || u.name || "")}"
+        />
+
+        <label>Username</label>
+
+        <input
+          id="profileUsername"
+          value="${esc(profileData.username || u.username || "")}"
+        />
+
+        <label>Mobile</label>
+
+        <input
+          id="profileMobile"
+          value="${esc(profileData.mobile || u.mobile || "")}"
+        />
+
+        <label>Email</label>
+
+        <input
+          id="profileEmail"
+          type="email"
+          value="${esc(profileData.email || u.email || "")}"
+        />
+
+        ${
+          u.role === "patient"
+            ? `
+              <label>Age</label>
+              <input
+                id="profileAge"
+                type="number"
+                min="0"
+                max="120"
+                value="${esc(profileData.age || u.age || "")}"
+              />
+            `
+            : ""
+        }
+
+        <label>Hospital name</label>
+
+        <input
+          id="profileHospital"
+          value="${esc(
+            profileData.hospital_name ||
+            u.hospital_name ||
+            ""
+          )}"
+        />
+
+        <label>
+          Hospital ID
+          ${
+            u.role === "patient"
+              ? `<span class="muted">(optional)</span>`
+              : ""
+          }
+        </label>
+
+        <input
+          id="profileHospitalId"
+          maxlength="4"
+          value="${esc(
+            profileData.hospital_id ||
+            u.hospital_id ||
+            ""
+          )}"
+          ${u.role !== "patient" ? "readonly" : ""}
+        />
+
+        <div class="form-actions">
+
+          <button
+            class="btn"
+            onclick="saveProfile()">
+            Save changes
+          </button>
+
+        </div>
+
+      </div>
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function saveProfile() {
+
+  try {
+
+    const hospitalName =
+      $("profileHospital").value.trim();
+
+    const hospitalId =
+      $("profileHospitalId").value.trim().toUpperCase();
+
+    if (
+      u.role !== "patient" &&
+      !validateHospitalId(
+        hospitalName,
+        hospitalId,
+        true
+      )
+    ) {
+      return;
+    }
+
+    const data =
+      await api("/api/profile", {
+        method: "PUT",
+
+        body: JSON.stringify({
+
+          name:
+            $("profileName").value.trim(),
+
+          username:
+            $("profileUsername").value.trim(),
+
+          mobile:
+            $("profileMobile").value.trim(),
+
+          email:
+            $("profileEmail").value.trim(),
+
+          age:
+            $("profileAge")?.value || null,
+
+          hospital_name:
+            hospitalName,
+
+          hospital_id:
+            hospitalId || null
+        })
+      });
+
+    u = data.user || data;
+
+    localStorage.qtaUser =
+      JSON.stringify(u);
+
+    toast("Profile updated.");
+
+    profile();
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+/* =========================================================
+   NURSE
+========================================================= */
+
+function nurse() {
+
+  A.innerHTML =
+    nav([
+      ["Patient registrations", "nlist()"],
+      ["OP queue", "nopqueue()"],
+      ["Messages", "nmsg()"],
+      ["History", "nhistory()"],
+      ["Profile", "profile()"]
+    ]) +
+    `<div id="c"></div>`;
+
+  nlist();
+}
+
+
+async function nlist() {
+
+  try {
+
+    const data =
+      await api("/api/cases");
+
+    $("c").innerHTML = `
+
+      <h2>Patient registrations</h2>
+
+      <p class="muted">
+        New and active patient registrations.
+      </p>
+
+      ${
+        data.length
+          ? data.map(nurseCaseCard).join("")
+          : emptyState(
+              "No registrations",
+              "New patient registrations will appear here."
+            )
+      }
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+function nurseCaseCard(item) {
+
+  return `
+    <div class="card case ${esc(item.risk_level || "")}">
+
+      <div class="case-header">
+
+        <div>
+
+          <div class="case-title">
+            ${esc(item.patient_name)}
+          </div>
+
+          <div class="case-meta">
+
+            <span>
+              Patient ID:
+              <b>${esc(item.patient_id || item.unique_id || "-")}</b>
+            </span>
+
+            <span>
+              Hospital:
+              <b>${esc(item.hospital_name || "-")}</b>
+            </span>
+
+          </div>
+
+        </div>
+
+        ${
+          item.risk_level
+            ? `
+              <span class="risk ${esc(item.risk_level)}">
+                ${esc(item.risk_level)} RISK
+              </span>
+            `
+            : ""
+        }
+
+      </div>
+
+      <p class="case-description">
+        ${esc(item.problem)}
+      </p>
+
+      <div class="case-actions">
+
+        <button
+          class="btn"
+          onclick="check(${Number(item.id)})">
+          Quick checkup
+        </button>
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+/* =========================================================
+   NURSE OP QUEUE
+========================================================= */
+
+async function nopqueue() {
+
+  try {
+
+    const data =
+      await api("/api/nurse/op-queue");
+
+    $("c").innerHTML = `
+
+      <h2>OP queue</h2>
+
+      <p class="muted">
+        Appointment patients waiting for their turn.
+      </p>
+
+      ${
+        data.length
+          ? data.map(opCard).join("")
+          : emptyState(
+              "No OP patients",
+              "Appointment patients will appear here."
+            )
+      }
+
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+function opCard(item) {
+
+  return `
+    <div class="card case ${esc(item.risk_level || "")}">
+
+      <div class="case-header">
+
+        <div>
+
+          <div class="queue-number">
+            #${esc(item.op_number)}
+          </div>
+
+          <div class="case-meta">
+
+            <span>
+              Patient:
+              <b>${esc(item.patient_name || "Patient")}</b>
+            </span>
+
+            <span>
+              Patient ID:
+              <b>${esc(item.patient_id || "-")}</b>
+            </span>
+
+          </div>
+
+        </div>
+
+        ${
+          item.risk_level
+            ? `
+              <span class="risk ${esc(item.risk_level)}">
+                ${esc(item.risk_level)} RISK
+              </span>
+            `
+            : ""
+        }
+
+      </div>
+
+      <div class="case-actions">
+
+        <button
+          class="btn"
+          onclick="check(${Number(item.id)})">
+          Quick checkup
+        </button>
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+/* =========================================================
+   NURSE CHECKUP
+========================================================= */
+
+async function check(id) {
+
+  $("c").innerHTML = `
+
+    <div class="panel">
+
+      <h2>Quick checkup</h2>
+
+      <p class="muted">
+        Enter the six vital measurements.
+      </p>
+
+      <div class="form-row">
+
+        <div>
+          <label>Respiration rate</label>
+          <input
+            id="rr"
+            type="number"
+            min="0"
+          />
+        </div>
+
+        <div>
+          <label>SpO₂ (%)</label>
+          <input
+            id="spo2"
+            type="number"
+            min="0"
+            max="100"
+          />
+        </div>
+
+      </div>
+
+      <div class="form-row">
+
+        <div>
+          <label>Systolic BP</label>
+          <input
+            id="sbp"
+            type="number"
+            min="0"
+          />
+        </div>
+
+        <div>
+          <label>Heart rate</label>
+          <input
+            id="hr"
+            type="number"
+            min="0"
+          />
+        </div>
+
+      </div>
+
+      <label>Consciousness</label>
+
+      <select id="con">
+
+        <option value="Alert">
+          Alert
+        </option>
+
+        <option value="Voice">
+          Voice
+        </option>
+
+        <option value="Pain">
+          Pain
+        </option>
+
+        <option value="Unresponsive">
+          Unresponsive
+        </option>
+
+        <option value="New confusion">
+          New confusion
+        </option>
+
+      </select>
+
+      <label>Temperature °C</label>
+
+      <input
+        id="temp"
+        type="number"
+        step="0.1"
+      />
+
+      <div class="form-actions">
+
+        <button
+          class="btn"
+          onclick="triage(${Number(id)})">
+          Analyze
+        </button>
+
+        <button
+          class="btn alt"
+          onclick="nlist()">
+          Cancel
+        </button>
+
+      </div>
+
+      <div id="result"></div>
+
+    </div>
+  `;
+}
+
+
+async function triage(id) {
+
+  try {
+
+    const data =
+      await api(`/api/cases/${id}/triage`, {
+        method: "POST",
+
+        body: JSON.stringify({
+
+          rr: $("rr").value,
+
+          spo2: $("spo2").value,
+
+          sbp: $("sbp").value,
+
+          heart_rate: $("hr").value,
+
+          consciousness:
+            $("con").value,
+
+          temperature:
+            $("temp").value
+        })
+      });
+
+    $("result").innerHTML = `
+
+      <div class="card case ${esc(data.risk)}">
+
+        <h2>
+          <span class="risk ${esc(data.risk)}">
+            ${esc(data.risk)} RISK
+          </span>
+        </h2>
+
+        <p>
+          Triage score:
+          <b>${esc(data.score)}</b>
+        </p>
+
+        ${
+          data.risk === "LOW"
+            ? `
+              <div class="success-box">
+                Routine clinical monitoring.
+              </div>
+            `
+            : data.risk === "MEDIUM"
+              ? `
+                <div class="warning-box">
+                  Clinical review should be arranged promptly.
+                </div>
+              `
+              : `
+                <div class="warning-box">
+                  High-risk result. Doctor review is required.
+                </div>
+              `
+        }
+
+        ${
+          data.risk !== "HIGH"
+            ? `
+              <button
+                class="btn"
+                onclick="transfer(${Number(id)})">
+                Transfer to doctor
+              </button>
+            `
+            : ""
+        }
+
+      </div>
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function transfer(id) {
+
+  try {
+
+    await api(`/api/cases/${id}/transfer`, {
+      method: "POST"
+    });
+
+    toast("Patient transferred to doctor.");
+
+    nlist();
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+/* =========================================================
+   NURSE MESSAGES
+========================================================= */
+
+async function nmsg() {
+
+  try {
+
+    const data =
+      await api("/api/messages");
+
+    $("c").innerHTML = `
+
+      <h2>Patient messages</h2>
+
+      ${
+        data.length
+          ? data.map(m => `
+              <div class="card">
+
+                <div class="case-title">
+                  ${esc(m.username || m.name || "Patient")}
+                </div>
+
+                <div class="case-meta">
+                  ID: ${esc(m.unique_id || m.patient_id || "-")}
+                </div>
+
+                <p class="case-description">
+                  ${esc(m.message)}
+                </p>
+
+              </div>
+            `).join("")
+          : emptyState(
+              "No messages",
+              "Patient help requests will appear here."
+            )
+      }
+
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function nhistory() {
+
+  try {
+
+    const data =
+      await api("/api/history");
+
+    $("c").innerHTML = `
+
+      <h2>Nurse history</h2>
+
+      ${
+        data.length
+          ? data.map(historyCard).join("")
+          : emptyState(
+              "No history",
+              "Completed patient records will appear here."
+            )
+      }
+
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+/* =========================================================
+   DOCTOR
+========================================================= */
+
+function doctor() {
+
+  A.innerHTML =
+    nav([
+      ["High risk queue", "dHighQueue()"],
+      ["Normal queue", "dNormalQueue()"],
+      ["History", "dhistory()"],
+      ["Hospital settings", "dsettings()"],
+      ["Profile", "profile()"]
+    ]) +
+    `<div id="c"></div>`;
+
+  dHighQueue();
+}
+
+
+async function dHighQueue() {
+
+  try {
+
+    const data =
+      await api("/api/doctor/queue");
+
+    const high =
+      data.filter(
+        x => String(x.risk_level).toUpperCase() === "HIGH"
+      );
+
+    $("c").innerHTML = `
+
+      <div class="queue-section">
+
+        <h2 class="priority-title">
+          High risk patients
+        </h2>
+
+        ${
+          high.length
+            ? high.map(doctorCard).join("")
+            : emptyState(
+                "No high-risk patients",
+                "High-priority patients will appear here."
+              )
+        }
+
+      </div>
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function dNormalQueue() {
+
+  try {
+
+    const data =
+      await api("/api/doctor/queue");
+
+    const normal =
+      data.filter(
+        x => String(x.risk_level).toUpperCase() !== "HIGH"
+      );
+
+    $("c").innerHTML = `
+
+      <div class="queue-section">
+
+        <h2 class="normal-title">
+          Normal queue
+        </h2>
+
+        ${
+          normal.length
+            ? normal.map(doctorCard).join("")
+            : emptyState(
+                "No patients waiting",
+                "Normal and medium-risk patients will appear here."
+              )
+        }
+
+      </div>
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+function doctorCard(item) {
+
+  return `
+    <div class="card case ${esc(item.risk_level || "")}">
+
+      <div class="case-header">
+
+        <div>
+
+          <div class="case-title">
+            ${esc(item.patient_name)}
+          </div>
+
+          <div class="case-meta">
+
+            <span>
+              Patient ID:
+              <b>${esc(item.patient_id || "-")}</b>
+            </span>
+
+            <span>
+              Hospital:
+              <b>${esc(item.hospital_name || "-")}</b>
+            </span>
+
+          </div>
+
+        </div>
+
+        <span class="risk ${esc(item.risk_level || "LOW")}">
+          ${esc(item.risk_level || "WAITING")}
+        </span>
+
+      </div>
+
+      <p class="case-description">
+        ${esc(item.problem)}
+      </p>
+
+      <div class="case-meta">
+
+        ${
+          item.news_score !== undefined
+            ? `
+              <span>
+                Score:
+                <b>${esc(item.news_score)}</b>
+              </span>
+            `
+            : ""
+        }
+
+      </div>
+
+      <div class="case-actions">
+
+        <button
+          class="btn"
+          onclick="doctorPatient(${Number(item.id)})">
+          Open patient
+        </button>
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+/* =========================================================
+   DOCTOR PATIENT PAGE
+========================================================= */
+
+async function doctorPatient(id) {
+
+  try {
+
+    const item =
+      await api(`/api/cases/${id}`);
+
+    $("c").innerHTML = `
+
+      <button
+        class="btn alt small"
+        onclick="dHighQueue()">
+        ← Back
+      </button>
+
+      <div class="panel" style="margin-top:18px">
+
+        <div class="case-header">
+
+          <div>
+            <h2>
+              Patient details
+            </h2>
+
+            <p class="muted">
+              Patient ID:
+              <b>${esc(item.patient_id || "-")}</b>
+            </p>
+          </div>
+
+          ${
+            item.risk_level
+              ? `
+                <span class="risk ${esc(item.risk_level)}">
+                  ${esc(item.risk_level)} RISK
+                </span>
+              `
+              : ""
+          }
+
+        </div>
+
+        <div class="profile-grid">
+
+          <div class="profile-item">
+            <small>Patient name</small>
+            <b>${esc(item.patient_name || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Age</small>
+            <b>${esc(item.age || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Hospital</small>
+            <b>${esc(item.hospital_name || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Hospital ID</small>
+            <b>${esc(item.hospital_id || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>OP number</small>
+            <b>${esc(item.op_number || "-")}</b>
+          </div>
+
+          <div class="profile-item">
+            <small>Triage score</small>
+            <b>${esc(item.news_score ?? "-")}</b>
+          </div>
+
+        </div>
+
+        <label>Problem</label>
+
+        <div class="info-box">
+          ${esc(item.problem || "-")}
+        </div>
+
+        <div class="document-box">
+
+          <h2>
+            Patient documents
+          </h2>
+
+          <label>Doctor note</label>
+
+          <textarea
+            id="doctorNote"
+            placeholder="Enter doctor note"
+          ></textarea>
+
+          <label>Medical slip</label>
+
+          <textarea
+            id="medicalSlip"
+            placeholder="Enter medical slip / instructions"
+          ></textarea>
+
+          <div class="form-actions">
+
+            <button
+              class="btn"
+              onclick="saveDoctorDocuments(${Number(id)})">
+              Save documents
+            </button>
+
+          </div>
+
+        </div>
+
+        <div class="document-box">
+
+          <h2>
+            Patient status
+          </h2>
+
+          <select id="doctorStatus">
+
+            <option value="under_review">
+              Under review
+            </option>
+
+            <option value="completed">
+              Completed
+            </option>
+
+            <option value="admitted">
+              Admitted
+            </option>
+
+            <option value="follow_up">
+              Follow-up
+            </option>
+
+          </select>
+
+          <div class="form-actions">
+
+            <button
+              class="btn"
+              onclick="status(${Number(id)})">
+              Update status
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+    `;
+
+    if ($("doctorNote")) {
+      $("doctorNote").value =
+        item.doctor_note || "";
+    }
+
+    if ($("medicalSlip")) {
+      $("medicalSlip").value =
+        item.medical_slip || "";
+    }
+
+    if ($("doctorStatus")) {
+      $("doctorStatus").value =
+        item.status || "under_review";
+    }
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function saveDoctorDocuments(id) {
+
+  try {
+
+    await api(`/api/cases/${id}/documents`, {
+      method: "PUT",
+
+      body: JSON.stringify({
+
+        doctor_note:
+          $("doctorNote").value.trim(),
+
+        medical_slip:
+          $("medicalSlip").value.trim()
+      })
+    });
+
+    toast("Patient documents saved.");
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+async function status(id) {
+
+  try {
+
+    const value =
+      $("doctorStatus")?.value ||
+      $("s" + id)?.value ||
+      "under_review";
+
+    await api(`/api/cases/${id}/status`, {
+      method: "POST",
+
+      body: JSON.stringify({
+        status: value
+      })
+    });
+
+    toast("Patient status updated.");
+
+    dHighQueue();
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+
+/* =========================================================
+   DOCTOR SETTINGS
+========================================================= */
+
+async function dsettings() {
+
+  try {
+
+    const s =
+      await api("/api/settings");
+
+    $("c").innerHTML = `
+
+      <div class="panel">
+
+        <h2>Hospital risk settings</h2>
+
+        <p class="muted">
+          These settings apply only to your hospital.
+        </p>
+
+        <label>Low maximum score</label>
+
+        <input
+          id="low"
+          value="${esc(s.low_max)}"
+          type="number"
+        />
+
+        <label>Medium maximum score</label>
+
+        <input
+          id="med"
+          value="${esc(s.medium_max)}"
+          type="number"
+        />
+
+        <label>Medium review time (minutes)</label>
+
+        <input
+          id="min"
+          value="${esc(s.medium_review_minutes)}"
+          type="number"
+        />
+
+        <div class="info-box">
+
+          Default:
+          Low ≤ 4,
+          Medium 5–6,
+          High ≥ 7.
+
+        </div>
+
+        <button
+          class="btn"
+          onclick="saveset()">
+          Save hospital settings
+        </button>
+
+      </div>
+    `;
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 
 async function saveset() {
 
@@ -1941,41 +2686,47 @@ async function saveset() {
       method: "PUT",
 
       body: JSON.stringify({
-        low_max: $("low").value,
-        medium_max: $("med").value,
-        medium_review_minutes: $("min").value
+
+        low_max:
+          $("low").value,
+
+        medium_max:
+          $("med").value,
+
+        medium_review_minutes:
+          $("min").value
+
       })
     });
 
-    toast("Hospital risk settings saved");
+    toast("Hospital settings saved.");
 
   } catch (error) {
     toast(error.message);
   }
 }
 
-/* =====================================================
-   DOCTOR HISTORY
-===================================================== */
 
 async function dhistory() {
 
   try {
 
-    const list = await api("/api/history");
+    const data =
+      await api("/api/history");
 
     $("c").innerHTML = `
-      <h2>Hospital History</h2>
+
+      <h2>Doctor history</h2>
 
       ${
-        list.length
-          ? list.map(caseCard).join("")
-          : `
-            <div class="card">
-              No history available.
-            </div>
-          `
+        data.length
+          ? data.map(historyCard).join("")
+          : emptyState(
+              "No history",
+              "Completed patient records will appear here."
+            )
       }
+
     `;
 
   } catch (error) {
@@ -1983,69 +2734,57 @@ async function dhistory() {
   }
 }
 
-/* =====================================================
-   COMMON CASE CARD
-===================================================== */
 
-function caseCard(x) {
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function formatDate(value) {
+
+  if (!value) {
+    return "Date not available";
+  }
+
+  const date =
+    new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Date not available";
+  }
+
+  return date.toLocaleString(
+    undefined,
+    {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    }
+  );
+}
+
+
+function emptyState(title, message) {
 
   return `
-    <div class="card case-card">
+    <div class="empty">
 
-      <div class="case-row">
+      <h3>
+        ${esc(title)}
+      </h3>
 
-        <div>
-          <h3>
-            ${esc(x.patient_name || "Patient")}
-          </h3>
-
-          <p class="muted">
-            ${esc(x.hospital_name || "")}
-          </p>
-        </div>
-
-        ${
-          x.risk_level
-            ? `
-              <span class="risk ${x.risk_level}">
-                ${x.risk_level} RISK
-              </span>
-            `
-            : `
-              <span class="status-pill">
-                ${esc(x.status || "Registered")}
-              </span>
-            `
-        }
-
-      </div>
-
-      ${
-        x.problem
-          ? `
-            <p>
-              ${esc(x.problem)}
-            </p>
-          `
-          : ""
-      }
-
-      ${
-        x.updated_at && formatDate(x.updated_at)
-          ? `
-            <small>
-              ${formatDate(x.updated_at)}
-            </small>
-          `
-          : ""
-      }
+      <p>
+        ${esc(message)}
+      </p>
 
     </div>
   `;
 }
 
-/* =====================================================
-   START APP
-===================================================== */
+
+/* =========================================================
+   START
+========================================================= */
 
 render();
