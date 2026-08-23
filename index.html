@@ -1,70 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
+  <title>Quick Triage Analyzer</title>
 
-  <title>QTA | Smart Hospital Queue</title>
-
-  <link
-    rel="stylesheet"
-    href="/style.css"
-  >
+  <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
 
-  <!-- =========================
-       HEADER
-  ========================== -->
-
+  <!-- TOP HEADER -->
   <header class="topbar">
 
-    <div
-      class="brand"
-      onclick="goHome()"
-    >
-      <div class="logo">
-        Q
-      </div>
+    <div class="brand" onclick="goHome()">
+      <div class="brand-icon">+</div>
 
       <div>
-        <h2>QTA</h2>
-        <p>Smart Care Queue</p>
+        <h1>Quick Triage Analyzer</h1>
+        <p>One queue. Clear care.</p>
       </div>
     </div>
 
-    <div id="bar"></div>
+    <div id="bar" class="user-bar"></div>
 
   </header>
 
 
-  <!-- =========================
-       MAIN APPLICATION
-  ========================== -->
-
+  <!-- MAIN WEBSITE -->
   <main id="app"></main>
 
 
-  <!-- =========================
-       TOAST MESSAGE
-  ========================== -->
-
-  <div
-    id="toast"
-    class="toast"
-  ></div>
+  <!-- TOAST / ERROR MESSAGE -->
+  <div id="toast" class="toast"></div>
 
 
-  <!-- =========================
-       JAVASCRIPT
-  ========================== -->
-
-  <script src="/app.js"></script>
+  <!-- FRONTEND JAVASCRIPT -->
+  <script src="app.js"></script>
 
 </body>
 </html>
