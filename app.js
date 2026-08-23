@@ -1,5 +1,29 @@
 const A=document.getElementById("app"),B=document.getElementById("bar");let token=localStorage.qtaToken||"",u=JSON.parse(localStorage.qtaUser||"null");const $=id=>document.getElementById(id),toast=x=>{$("toast").textContent=x;$("toast").style.display="block";setTimeout(()=>$("toast").style.display="none",3000)};
-async function api(url,o={}){let r=await fetch(url,{headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{})},...o}),d=await r.json();if(!r.ok)throw Error(d.error);return d}
+async function api(url, o = {}) {
+  const r = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {})
+    },
+    ...o
+  });
+
+  const text = await r.text();
+
+  let d;
+  try {
+    d = JSON.parse(text);
+  } catch (e) {
+    console.error("Server returned:", text);
+    throw new Error("Server error: API returned HTML instead of JSON");
+  }
+
+  if (!r.ok) {
+    throw new Error(d.error || "Request failed");
+  }
+
+  return d;
+}
 function esc(x){return String(x??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}function logout(){localStorage.clear();token="";u=null;render()}function render(){B.innerHTML=u?`${u.username} <button class="btn alt" onclick="logout()">Logout</button>`:`<button class="btn alt" onclick="auth()">Sign in</button>`;if(!u)return home();u.role==="patient"?patient():u.role==="nurse"?nurse():doctor()}
 function home(){A.innerHTML=`<div class="hero"><small>ONE QUEUE. CLEAR CARE.</small><h1>The calm way to get <i>seen.</i></h1><p class="muted">One workflow connecting patients, nurses and doctors.</p></div><div class="grid">${["patient","nurse","doctor"].map(r=>`<div class="card role" onclick="auth('${r}')"><h2>${r==="nurse"?"Nurse / Staff":r[0].toUpperCase()+r.slice(1)}</h2><p class="muted">Continue to your QTA workspace.</p><button class="btn">Continue</button></div>`).join("")}</div><p class="muted">QTA is clinical decision support and does not replace professional clinical judgment.</p>`}
 function auth(role="patient"){A.innerHTML=`<div class="auth card"><button class="btn alt" onclick="home()">← Back</button><h2>${role==="nurse"?"Nurse / Staff":role} login</h2><p><button class="btn alt" onclick="authMode('login','${role}')">Sign in</button> <button class="btn alt" onclick="authMode('register','${role}')">New register</button></p><div id="box"></div></div>`;authMode("login",role)}
