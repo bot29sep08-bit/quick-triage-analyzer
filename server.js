@@ -4,39 +4,99 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
-/* =========================
-   TEMPORARY IN-MEMORY DATA
-   ========================= */
+/* =========================================================
+   TEMPORARY DATA STORE
+   ========================================================= */
 
 let users = [];
 let cases = [];
+let appointments = [];
 let messages = [];
-let settings = {};
+let documents = [];
+let hospitalSettingsStore = {};
 
-let nextUserId = 1;
+let nextUserNumber = 1;
 let nextCaseId = 1;
+let nextAppointmentId = 1;
 let nextMessageId = 1;
+let nextDocumentId = 1;
 
-/* =========================
-   HELPER FUNCTIONS
-   ========================= */
+/* =========================================================
+   HELPERS
+   ========================================================= */
+
+function now() {
+  return new Date().toISOString();
+}
+
+function cleanHospitalId(value = "") {
+  return String(value).trim().toUpperCase();
+}
 
 function makeToken(user) {
-  return `qta-${user.id}-${Date.now()}`;
+  return `qta-${user.id}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+}
+
+function randomSixDigits() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+/*
+ Patient ID: 10 numeric digits
+
+ Nurse ID: 10 characters:
+ first 6 digits + last 4 = Hospital ID
+ Example: 583921AP12
+
+ Doctor ID: 10 characters:
+ first 4 = Hospital ID + last 6 digits
+ Example: AP12583921
+*/
+function createUniqueId(role, hospitalId = "") {
+  if (role === "patient") {
+    let id;
+
+    do {
+      id =
+        String(Date.now()).slice(-6) +
+        String(nextUserNumber).padStart(4, "0");
+    } while (users.some((u) => u.unique_id === id));
+
+    return id;
+  }
+
+  const six = randomSixDigits();
+  const hospital = cleanHospitalId(hospitalId);
+
+  let id =
+    role === "nurse"
+      ? six + hospital
+      : hospital + six;
+
+  while (users.some((u) => u.unique_id === id)) {
+    const newSix = randomSixDigits();
+
+    id =
+      role === "nurse"
+        ? newSix + hospital
+        : hospital + newSix;
+  }
+
+  return id;
 }
 
 function getUserFromRequest(req) {
   const auth = req.headers.authorization || "";
 
-  if (!auth.startsWith("Bearer ")) {
-    return null;
-  }
+  if (!auth.startsWith("Bearer ")) return null;
 
   const token = auth.replace("Bearer ", "");
 
-  return users.find(user => user.token === token) || null;
+  return users.find((user) => user.token === token) || null;
 }
 
 function requireAuth(req, res, next) {
@@ -52,43 +112,74 @@ function requireAuth(req, res, next) {
   next();
 }
 
-function generateUniqueId(role) {
-  const prefix =
-    role === "patient"
-      ? "PAT"
-      : role === "nurse"
-      ? "NUR"
-      : "DOC";
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: "You do not have permission for this action"
+      });
+    }
 
-  return `${prefix}${String(nextUserId).padStart(4, "0")}`;
+    next();
+  };
 }
 
-function hospitalSettings(hospitalId) {
-  if (!settings[hospitalId]) {
-    settings[hospitalId] = {
+function hospitalKey(name = "", id = "") {
+  return cleanHospitalId(id) || String(name).trim().toLowerCase();
+}
+
+function getHospitalSettings(caseItem) {
+  const key = hospitalKey(
+    caseItem.hospital_name,
+    caseItem.hospital_id
+  );
+
+  if (!hospitalSettingsStore[key]) {
+    hospitalSettingsStore[key] = {
       low_max: 4,
       medium_max: 6,
       medium_review_minutes: 30
     };
   }
 
-  return settings[hospitalId];
+  return hospitalSettingsStore[key];
 }
 
-/* =========================
-   HEALTH CHECK
-   ========================= */
+function calculateRiskMinutes(risk) {
+  if (risk === "HIGH") return 15;
+  if (risk === "LOW") return 5;
+  if (risk === "MEDIUM") return 5;
+
+  return 10;
+}
+
+function sortRisk(a, b) {
+  const priority = {
+    HIGH: 1,
+    MEDIUM: 2,
+    LOW: 3
+  };
+
+  return (
+    (priority[a.risk_level] || 4) -
+    (priority[b.risk_level] || 4)
+  );
+}
+
+/* =========================================================
+   HEALTH
+   ========================================================= */
 
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
-    message: "Quick Triage Analyzer API is running"
+    message: "Quick Triage Analyzer backend is running"
   });
 });
 
-/* =========================
-   AUTH
-   ========================= */
+/* =========================================================
+   AUTH — DUPLICATE USERNAMES ALLOWED
+   ========================================================= */
 
 app.post("/api/auth/register", (req, res) => {
   try {
@@ -111,48 +202,60 @@ app.post("/api/auth/register", (req, res) => {
 
     if (!["patient", "nurse", "doctor"].includes(role)) {
       return res.status(400).json({
-        error: "Invalid role"
+        error: "Invalid account type"
       });
     }
 
-    if (users.some(user => user.username === username)) {
+    if (role === "patient" && !age) {
       return res.status(400).json({
-        error: "Username already exists"
+        error: "Age is required for patient registration"
       });
     }
 
-    if (role !== "patient") {
+    if (role === "nurse" || role === "doctor") {
       if (!hospital_name || !hospital_id) {
         return res.status(400).json({
           error: "Hospital name and Hospital ID are required"
         });
       }
 
-      if (!/^[A-Za-z]{2}\d{2}$/.test(hospital_id)) {
+      const hospital = cleanHospitalId(hospital_id);
+
+      if (!/^[A-Z]{2}\d{2}$/.test(hospital)) {
         return res.status(400).json({
-          error: "Hospital ID must be 2 letters followed by 2 numbers, for example AB12"
+          error:
+            "Hospital ID must contain 2 letters and 2 numbers, for example AP12"
         });
       }
     }
 
-    if (role === "patient" && !age) {
-      return res.status(400).json({
-        error: "Age is required"
-      });
-    }
+    const uniqueId = createUniqueId(
+      role,
+      role === "patient" ? "" : hospital_id
+    );
 
     const user = {
-      id: nextUserId++,
-      unique_id: generateUniqueId(role),
+      id: nextUserNumber++,
+      unique_id: uniqueId,
       role,
-      username,
-      password,
-      mobile,
-      email: email || "",
-      age: role === "patient" ? Number(age) : null,
-      hospital_name: role !== "patient" ? hospital_name : null,
+      username: String(username).trim(),
+      password: String(password),
+      mobile: String(mobile).trim(),
+      email: String(email || "").trim(),
+      age:
+        role === "patient"
+          ? Number(age)
+          : null,
+      hospital_name:
+        role !== "patient"
+          ? String(hospital_name).trim()
+          : null,
       hospital_id:
-        role !== "patient" ? hospital_id.toUpperCase() : null
+        role !== "patient"
+          ? cleanHospitalId(hospital_id)
+          : null,
+      created_at: now(),
+      token: null
     };
 
     const token = makeToken(user);
@@ -162,20 +265,14 @@ app.post("/api/auth/register", (req, res) => {
 
     res.status(201).json({
       token,
-      user: {
-        id: user.id,
-        unique_id: user.unique_id,
-        role: user.role,
-        username: user.username,
-        hospital_id: user.hospital_id
-      }
+      user: publicUser(user)
     });
 
   } catch (error) {
     console.error("REGISTER ERROR:", error);
 
     res.status(500).json({
-      error: "Server error during registration"
+      error: "Registration failed"
     });
   }
 });
@@ -183,18 +280,38 @@ app.post("/api/auth/register", (req, res) => {
 
 app.post("/api/auth/login", (req, res) => {
   try {
-    const { role, username, password } = req.body;
+    const {
+      role,
+      username,
+      password,
+      unique_id
+    } = req.body;
+
+    if (
+      !role ||
+      !username ||
+      !password ||
+      !unique_id
+    ) {
+      return res.status(400).json({
+        error:
+          "Username, Unique ID and password are required"
+      });
+    }
 
     const user = users.find(
-      user =>
-        user.role === role &&
-        user.username === username &&
-        user.password === password
+      (item) =>
+        item.role === role &&
+        item.username === String(username).trim() &&
+        item.unique_id ===
+          String(unique_id).trim().toUpperCase() &&
+        item.password === String(password)
     );
 
     if (!user) {
       return res.status(401).json({
-        error: "Invalid username, password, or role"
+        error:
+          "Username, Unique ID or password is incorrect"
       });
     }
 
@@ -203,453 +320,1102 @@ app.post("/api/auth/login", (req, res) => {
 
     res.json({
       token,
-      user: {
-        id: user.id,
-        unique_id: user.unique_id,
-        role: user.role,
-        username: user.username,
-        hospital_id: user.hospital_id
-      }
+      user: publicUser(user)
     });
 
   } catch (error) {
     console.error("LOGIN ERROR:", error);
 
     res.status(500).json({
-      error: "Server error during login"
+      error: "Login failed"
     });
   }
 });
 
+function publicUser(user) {
+  return {
+    id: user.id,
+    unique_id: user.unique_id,
+    role: user.role,
+    username: user.username,
+    mobile: user.mobile,
+    email: user.email,
+    age: user.age,
+    hospital_name: user.hospital_name,
+    hospital_id: user.hospital_id,
+    created_at: user.created_at
+  };
+}
 
-/* =========================
-   PATIENT CASES
-   ========================= */
+/* =========================================================
+   PROFILE
+   ========================================================= */
 
-app.post("/api/cases", requireAuth, (req, res) => {
-  try {
-    if (req.user.role !== "patient") {
-      return res.status(403).json({
-        error: "Only patients can create registrations"
-      });
-    }
-
-    const {
-      patient_name,
-      age,
-      problem,
-      location_status,
-      hospital_id
-    } = req.body;
-
-    if (
-      !patient_name ||
-      !age ||
-      !problem ||
-      !location_status ||
-      !hospital_id
-    ) {
-      return res.status(400).json({
-        error: "Please fill all patient registration fields"
-      });
-    }
-
-    const hospital = hospital_id.toUpperCase();
-
-    const patientCase = {
-      id: nextCaseId++,
-      patient_id: req.user.unique_id,
-      patient_name,
-      age: Number(age),
-      problem,
-      location_status,
-      hospital_id: hospital,
-      risk_level: null,
-      news_score: null,
-      status: "registered",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      transferred_to_doctor: false
-    };
-
-    cases.push(patientCase);
-
-    res.status(201).json(patientCase);
-
-  } catch (error) {
-    console.error("CASE CREATE ERROR:", error);
-
-    res.status(500).json({
-      error: "Could not create registration"
-    });
-  }
+app.get("/api/profile", requireAuth, (req, res) => {
+  res.json(publicUser(req.user));
 });
 
 
-app.get("/api/cases/my", requireAuth, (req, res) => {
-  const result = cases.filter(
-    patientCase => patientCase.patient_id === req.user.unique_id
-  );
+app.put("/api/profile", requireAuth, (req, res) => {
+  const {
+    mobile,
+    email,
+    age
+  } = req.body;
 
-  res.json(result);
+  if (mobile) {
+    req.user.mobile = String(mobile).trim();
+  }
+
+  if (email !== undefined) {
+    req.user.email = String(email).trim();
+  }
+
+  if (
+    req.user.role === "patient" &&
+    age
+  ) {
+    req.user.age = Number(age);
+  }
+
+  res.json(publicUser(req.user));
 });
 
 
-app.get("/api/cases", requireAuth, (req, res) => {
-  if (req.user.role !== "nurse" && req.user.role !== "doctor") {
-    return res.status(403).json({
-      error: "Access denied"
+app.put("/api/profile/password", requireAuth, (req, res) => {
+  const {
+    current_password,
+    new_password
+  } = req.body;
+
+  if (
+    !current_password ||
+    !new_password
+  ) {
+    return res.status(400).json({
+      error:
+        "Current password and new password are required"
     });
   }
 
-  let result = cases;
-
-  if (req.user.hospital_id) {
-    result = cases.filter(
-      patientCase =>
-        patientCase.hospital_id === req.user.hospital_id
-    );
-  }
-
-  res.json(result);
-});
-
-
-/* =========================
-   TRIAGE
-   ========================= */
-
-app.post("/api/cases/:id/triage", requireAuth, (req, res) => {
-  try {
-    if (req.user.role !== "nurse") {
-      return res.status(403).json({
-        error: "Only nurses can perform triage"
-      });
-    }
-
-    const patientCase = cases.find(
-      item => item.id === Number(req.params.id)
-    );
-
-    if (!patientCase) {
-      return res.status(404).json({
-        error: "Patient registration not found"
-      });
-    }
-
-    const {
-      rr,
-      spo2,
-      sbp,
-      heart_rate,
-      consciousness,
-      temperature
-    } = req.body;
-
-    let score = 0;
-
-    const respiration = Number(rr);
-    const oxygen = Number(spo2);
-    const bloodPressure = Number(sbp);
-    const heartRate = Number(heart_rate);
-    const temp = Number(temperature);
-
-    if (respiration <= 8 || respiration >= 25) score += 3;
-    else if (respiration >= 21) score += 1;
-
-    if (oxygen <= 91) score += 3;
-    else if (oxygen <= 93) score += 2;
-    else if (oxygen <= 95) score += 1;
-
-    if (bloodPressure <= 90) score += 3;
-    else if (bloodPressure <= 100) score += 2;
-    else if (bloodPressure <= 110) score += 1;
-
-    if (heartRate <= 40 || heartRate >= 131) score += 3;
-    else if (heartRate >= 111) score += 2;
-    else if (heartRate >= 91) score += 1;
-
-    if (consciousness !== "Alert") score += 3;
-
-    if (temp < 35 || temp >= 39.1) score += 3;
-    else if (temp >= 38.1) score += 1;
-
-    const currentSettings = hospitalSettings(
-      patientCase.hospital_id
-    );
-
-    let risk;
-
-    if (score <= currentSettings.low_max) {
-      risk = "LOW";
-    } else if (score <= currentSettings.medium_max) {
-      risk = "MEDIUM";
-    } else {
-      risk = "HIGH";
-    }
-
-    patientCase.news_score = score;
-    patientCase.risk_level = risk;
-    patientCase.updated_at = new Date().toISOString();
-
-    if (risk === "HIGH") {
-      patientCase.transferred_to_doctor = true;
-      patientCase.status = "high_alert";
-    }
-
-    res.json({
-      score,
-      risk,
-      case: patientCase
-    });
-
-  } catch (error) {
-    console.error("TRIAGE ERROR:", error);
-
-    res.status(500).json({
-      error: "Could not analyze patient"
-    });
-  }
-});
-
-
-/* =========================
-   TRANSFER TO DOCTOR
-   ========================= */
-
-app.post("/api/cases/:id/transfer", requireAuth, (req, res) => {
-  if (req.user.role !== "nurse") {
-    return res.status(403).json({
-      error: "Only nurses can transfer patients"
+  if (
+    req.user.password !== current_password
+  ) {
+    return res.status(400).json({
+      error: "Current password is incorrect"
     });
   }
 
-  const patientCase = cases.find(
-    item => item.id === Number(req.params.id)
-  );
-
-  if (!patientCase) {
-    return res.status(404).json({
-      error: "Patient not found"
+  if (new_password.length < 4) {
+    return res.status(400).json({
+      error:
+        "New password must contain at least 4 characters"
     });
   }
 
-  patientCase.transferred_to_doctor = true;
-  patientCase.status = "transferred";
-  patientCase.updated_at = new Date().toISOString();
+  req.user.password = new_password;
 
   res.json({
-    message: "Patient transferred to doctor",
-    case: patientCase
+    message: "Password changed successfully"
   });
 });
 
+/* =========================================================
+   PATIENT QUICK REGISTRATION
+   ========================================================= */
 
-/* =========================
-   DOCTOR QUEUE
-   ========================= */
+app.post(
+  "/api/cases",
+  requireAuth,
+  requireRole("patient"),
+  (req, res) => {
+    try {
+      const {
+        patient_name,
+        age,
+        problem,
+        location_status,
+        hospital_name,
+        hospital_id
+      } = req.body;
 
-app.get("/api/doctor/queue", requireAuth, (req, res) => {
-  if (req.user.role !== "doctor") {
-    return res.status(403).json({
-      error: "Only doctors can access the priority queue"
-    });
-  }
+      if (
+        !patient_name ||
+        !age ||
+        !problem ||
+        !location_status ||
+        !hospital_name
+      ) {
+        return res.status(400).json({
+          error:
+            "Please fill patient name, age, problem, location and hospital name"
+        });
+      }
 
-  const queue = cases
-    .filter(
-      patientCase =>
-        patientCase.hospital_id === req.user.hospital_id &&
-        patientCase.transferred_to_doctor
-    )
-    .sort((a, b) => {
-      const riskOrder = {
-        HIGH: 3,
-        MEDIUM: 2,
-        LOW: 1
+      const patientCase = {
+        id: nextCaseId++,
+        patient_id: req.user.unique_id,
+        patient_name: String(patient_name).trim(),
+        age: Number(age),
+        problem: String(problem).trim(),
+        location_status,
+        hospital_name:
+          String(hospital_name).trim(),
+        hospital_id:
+          cleanHospitalId(hospital_id || ""),
+        risk_level: null,
+        news_score: null,
+        vitals: null,
+        status: "registered",
+        transferred_to_doctor: false,
+        doctor_notes: "",
+        created_at: now(),
+        updated_at: now()
       };
 
-      return (
-        (riskOrder[b.risk_level] || 0) -
-        (riskOrder[a.risk_level] || 0)
+      cases.push(patientCase);
+
+      res.status(201).json(patientCase);
+
+    } catch (error) {
+      console.error("CASE ERROR:", error);
+
+      res.status(500).json({
+        error: "Could not save registration"
+      });
+    }
+  }
+);
+
+
+/* =========================================================
+   CASE LISTS
+   ========================================================= */
+
+app.get(
+  "/api/cases/my",
+  requireAuth,
+  requireRole("patient"),
+  (req, res) => {
+    const result = cases
+      .filter(
+        (item) =>
+          item.patient_id === req.user.unique_id
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.created_at) -
+          new Date(a.created_at)
       );
-    });
 
-  res.json(queue);
-});
-
-
-/* =========================
-   CASE STATUS
-   ========================= */
-
-app.post("/api/cases/:id/status", requireAuth, (req, res) => {
-  if (req.user.role !== "doctor") {
-    return res.status(403).json({
-      error: "Only doctors can update patient status"
-    });
+    res.json(result);
   }
+);
 
-  const patientCase = cases.find(
-    item => item.id === Number(req.params.id)
-  );
 
-  if (!patientCase) {
-    return res.status(404).json({
-      error: "Patient not found"
-    });
+app.get(
+  "/api/cases",
+  requireAuth,
+  requireRole("nurse", "doctor"),
+  (req, res) => {
+    const result = cases
+      .filter(
+        (item) =>
+          (
+            item.hospital_id &&
+            item.hospital_id ===
+              req.user.hospital_id
+          ) ||
+          (
+            !item.hospital_id &&
+            item.hospital_name
+              .toLowerCase() ===
+              req.user.hospital_name
+                .toLowerCase()
+          )
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.created_at) -
+          new Date(a.created_at)
+      );
+
+    res.json(result);
   }
-
-  patientCase.status = req.body.status;
-  patientCase.updated_at = new Date().toISOString();
-
-  res.json(patientCase);
-});
+);
 
 
-/* =========================
-   MESSAGES
-   ========================= */
+app.get(
+  "/api/cases/:id",
+  requireAuth,
+  (req, res) => {
+    const item = cases.find(
+      (caseItem) =>
+        caseItem.id === Number(req.params.id)
+    );
 
-app.post("/api/messages", requireAuth, (req, res) => {
-  try {
-    const { hospital_id, message } = req.body;
-
-    if (!hospital_id || !message) {
-      return res.status(400).json({
-        error: "Hospital ID and message are required"
+    if (!item) {
+      return res.status(404).json({
+        error: "Registration not found"
       });
     }
 
-    const newMessage = {
-      id: nextMessageId++,
-      user_id: req.user.id,
-      username: req.user.username,
-      unique_id: req.user.unique_id,
-      hospital_id: hospital_id.toUpperCase(),
+    const allowed =
+      req.user.role === "patient"
+        ? item.patient_id === req.user.unique_id
+        : (
+            item.hospital_id ===
+              req.user.hospital_id ||
+            item.hospital_name
+              .toLowerCase() ===
+              req.user.hospital_name
+                .toLowerCase()
+          );
+
+    if (!allowed) {
+      return res.status(403).json({
+        error: "Access denied"
+      });
+    }
+
+    res.json(item);
+  }
+);
+
+/* =========================================================
+   TRIAGE — SIX VITALS
+   ========================================================= */
+
+app.post(
+  "/api/cases/:id/triage",
+  requireAuth,
+  requireRole("nurse"),
+  (req, res) => {
+    try {
+      const item = cases.find(
+        (caseItem) =>
+          caseItem.id === Number(req.params.id)
+      );
+
+      if (!item) {
+        return res.status(404).json({
+          error: "Patient registration not found"
+        });
+      }
+
+      const {
+        rr,
+        spo2,
+        sbp,
+        heart_rate,
+        consciousness,
+        temperature
+      } = req.body;
+
+      const respiration = Number(rr);
+      const oxygen = Number(spo2);
+      const bloodPressure = Number(sbp);
+      const heartRate = Number(heart_rate);
+      const temp = Number(temperature);
+
+      if (
+        !respiration ||
+        !oxygen ||
+        !bloodPressure ||
+        !heartRate ||
+        !consciousness ||
+        Number.isNaN(temp)
+      ) {
+        return res.status(400).json({
+          error:
+            "Please enter all six vital measurements"
+        });
+      }
+
+      let score = 0;
+
+      if (
+        respiration <= 8 ||
+        respiration >= 25
+      ) {
+        score += 3;
+      } else if (respiration >= 21) {
+        score += 1;
+      }
+
+      if (oxygen <= 91) {
+        score += 3;
+      } else if (oxygen <= 93) {
+        score += 2;
+      } else if (oxygen <= 95) {
+        score += 1;
+      }
+
+      if (bloodPressure <= 90) {
+        score += 3;
+      } else if (bloodPressure <= 100) {
+        score += 2;
+      } else if (bloodPressure <= 110) {
+        score += 1;
+      }
+
+      if (
+        heartRate <= 40 ||
+        heartRate >= 131
+      ) {
+        score += 3;
+      } else if (heartRate >= 111) {
+        score += 2;
+      } else if (heartRate >= 91) {
+        score += 1;
+      }
+
+      if (
+        consciousness !== "Alert"
+      ) {
+        score += 3;
+      }
+
+      if (
+        temp < 35 ||
+        temp >= 39.1
+      ) {
+        score += 3;
+      } else if (temp >= 38.1) {
+        score += 1;
+      }
+
+      const setting =
+        getHospitalSettings(item);
+
+      let risk;
+
+      if (score <= setting.low_max) {
+        risk = "LOW";
+      } else if (
+        score <= setting.medium_max
+      ) {
+        risk = "MEDIUM";
+      } else {
+        risk = "HIGH";
+      }
+
+      item.news_score = score;
+      item.risk_level = risk;
+
+      item.vitals = {
+        respiration_rate: respiration,
+        spo2: oxygen,
+        systolic_bp: bloodPressure,
+        heart_rate: heartRate,
+        consciousness,
+        temperature: temp
+      };
+
+      item.updated_at = now();
+
+      if (risk === "HIGH") {
+        item.transferred_to_doctor = true;
+        item.status = "high_priority";
+      } else {
+        item.status = "triaged";
+      }
+
+      res.json({
+        score,
+        risk,
+        case: item
+      });
+
+    } catch (error) {
+      console.error("TRIAGE ERROR:", error);
+
+      res.status(500).json({
+        error:
+          "Could not complete triage analysis"
+      });
+    }
+  }
+);
+
+
+/* =========================================================
+   TRANSFER TO DOCTOR
+   ========================================================= */
+
+app.post(
+  "/api/cases/:id/transfer",
+  requireAuth,
+  requireRole("nurse"),
+  (req, res) => {
+    const item = cases.find(
+      (caseItem) =>
+        caseItem.id === Number(req.params.id)
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Patient not found"
+      });
+    }
+
+    item.transferred_to_doctor = true;
+    item.status = "transferred";
+    item.updated_at = now();
+
+    res.json({
+      message:
+        "Patient transferred to doctor queue",
+      case: item
+    });
+  }
+);
+
+/* =========================================================
+   APPOINTMENTS / OP
+   ========================================================= */
+
+app.post(
+  "/api/appointments",
+  requireAuth,
+  requireRole("patient"),
+  (req, res) => {
+    try {
+      const {
+        hospital_name,
+        hospital_id,
+        appointment_date,
+        appointment_time
+      } = req.body;
+
+      if (
+        !hospital_name ||
+        !appointment_date ||
+        !appointment_time
+      ) {
+        return res.status(400).json({
+          error:
+            "Hospital name, date and time are required"
+        });
+      }
+
+      const hospitalId =
+        cleanHospitalId(hospital_id || "");
+
+      const previous = appointments
+        .filter(
+          (item) =>
+            item.status !== "completed" &&
+            item.appointment_date ===
+              appointment_date &&
+            (
+              item.hospital_id === hospitalId ||
+              (
+                !hospitalId &&
+                item.hospital_name
+                  .toLowerCase() ===
+                  hospital_name
+                    .toLowerCase()
+              )
+            )
+        )
+        .sort(
+          (a, b) =>
+            a.op_number - b.op_number
+        );
+
+      const patientsBefore =
+        previous.length;
+
+      const totalMinutes =
+        previous.reduce(
+          (total, appointment) =>
+            total +
+            calculateRiskMinutes(
+              appointment.risk_level
+            ),
+          0
+        );
+
+      const requestedDateTime =
+        new Date(
+          `${appointment_date}T${appointment_time}`
+        );
+
+      const estimatedDateTime =
+        new Date(
+          requestedDateTime.getTime() +
+          totalMinutes * 60000
+        );
+
+      const maxOp =
+        appointments
+          .filter(
+            (item) =>
+              item.appointment_date ===
+                appointment_date &&
+              (
+                item.hospital_id ===
+                  hospitalId ||
+                (
+                  !hospitalId &&
+                  item.hospital_name
+                    .toLowerCase() ===
+                    hospital_name
+                      .toLowerCase()
+                )
+              )
+          )
+          .reduce(
+            (max, item) =>
+              Math.max(max, item.op_number),
+            0
+          );
+
+      const appointment = {
+        id: nextAppointmentId++,
+        patient_id: req.user.unique_id,
+        patient_name: req.user.username,
+        hospital_name:
+          String(hospital_name).trim(),
+        hospital_id: hospitalId,
+        appointment_date,
+        requested_time: appointment_time,
+        estimated_time:
+          estimatedDateTime.toISOString(),
+        patients_before:
+          patientsBefore,
+        op_number: maxOp + 1,
+        risk_level: null,
+        status: "remaining",
+        created_at: now(),
+        updated_at: now()
+      };
+
+      appointments.push(appointment);
+
+      res.status(201).json({
+        ...appointment,
+        disclaimer:
+          "This time is only an estimate and may change depending on patient condition, priority cases and hospital workload."
+      });
+
+    } catch (error) {
+      console.error(
+        "APPOINTMENT ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Could not create appointment"
+      });
+    }
+  }
+);
+
+
+app.get(
+  "/api/appointments/my",
+  requireAuth,
+  requireRole("patient"),
+  (req, res) => {
+    const result = appointments
+      .filter(
+        (item) =>
+          item.patient_id === req.user.unique_id
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.created_at) -
+          new Date(a.created_at)
+      );
+
+    res.json(result);
+  }
+);
+
+
+app.get(
+  "/api/appointments",
+  requireAuth,
+  requireRole("nurse", "doctor"),
+  (req, res) => {
+    const result = appointments
+      .filter(
+        (item) =>
+          item.hospital_id ===
+            req.user.hospital_id ||
+          (
+            !item.hospital_id &&
+            item.hospital_name
+              .toLowerCase() ===
+              req.user.hospital_name
+                .toLowerCase()
+          )
+      )
+      .sort(
+        (a, b) =>
+          a.op_number - b.op_number
+      );
+
+    res.json(result);
+  }
+);
+
+
+app.post(
+  "/api/appointments/:id/status",
+  requireAuth,
+  requireRole("nurse", "doctor"),
+  (req, res) => {
+    const item = appointments.find(
+      (appointment) =>
+        appointment.id === Number(req.params.id)
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "OP not found"
+      });
+    }
+
+    const {
+      status,
+      risk_level
+    } = req.body;
+
+    if (status) {
+      item.status = status;
+    }
+
+    if (risk_level) {
+      item.risk_level = risk_level;
+    }
+
+    item.updated_at = now();
+
+    res.json(item);
+  }
+);
+
+/* =========================================================
+   DOCTOR QUEUES
+   ========================================================= */
+
+app.get(
+  "/api/doctor/high-queue",
+  requireAuth,
+  requireRole("doctor"),
+  (req, res) => {
+    const result = cases
+      .filter(
+        (item) =>
+          item.transferred_to_doctor &&
+          item.risk_level === "HIGH" &&
+          item.hospital_id ===
+            req.user.hospital_id
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.updated_at) -
+          new Date(b.updated_at)
+      );
+
+    res.json(result);
+  }
+);
+
+
+app.get(
+  "/api/doctor/normal-queue",
+  requireAuth,
+  requireRole("doctor"),
+  (req, res) => {
+    const result = cases
+      .filter(
+        (item) =>
+          item.transferred_to_doctor &&
+          item.risk_level !== "HIGH" &&
+          item.hospital_id ===
+            req.user.hospital_id
+      )
+      .sort(sortRisk);
+
+    res.json(result);
+  }
+);
+
+
+/* =========================================================
+   DOCTOR CASE STATUS / NOTES
+   ========================================================= */
+
+app.post(
+  "/api/cases/:id/status",
+  requireAuth,
+  requireRole("doctor"),
+  (req, res) => {
+    const item = cases.find(
+      (caseItem) =>
+        caseItem.id === Number(req.params.id)
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Patient not found"
+      });
+    }
+
+    const {
+      status,
+      notes
+    } = req.body;
+
+    if (status) {
+      item.status = status;
+    }
+
+    if (notes !== undefined) {
+      item.doctor_notes =
+        String(notes);
+    }
+
+    item.updated_at = now();
+
+    res.json(item);
+  }
+);
+
+/* =========================================================
+   DOCTOR MEDICAL SLIPS / DOCUMENTS
+   ========================================================= */
+
+app.post(
+  "/api/documents",
+  requireAuth,
+  requireRole("doctor"),
+  (req, res) => {
+    try {
+      const {
+        patient_id,
+        title,
+        type,
+        content
+      } = req.body;
+
+      if (
+        !patient_id ||
+        !title ||
+        !content
+      ) {
+        return res.status(400).json({
+          error:
+            "Patient ID, title and content are required"
+        });
+      }
+
+      const document = {
+        id: nextDocumentId++,
+        patient_id:
+          String(patient_id).trim(),
+        doctor_id:
+          req.user.unique_id,
+        doctor_name:
+          req.user.username,
+        hospital_name:
+          req.user.hospital_name,
+        hospital_id:
+          req.user.hospital_id,
+        title: String(title).trim(),
+        type:
+          type || "medical_slip",
+        content:
+          String(content).trim(),
+        created_at: now()
+      };
+
+      documents.push(document);
+
+      res.status(201).json(document);
+
+    } catch (error) {
+      console.error(
+        "DOCUMENT ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Could not save document"
+      });
+    }
+  }
+);
+
+
+app.get(
+  "/api/documents/my",
+  requireAuth,
+  requireRole("patient"),
+  (req, res) => {
+    const result = documents.filter(
+      (item) =>
+        item.patient_id ===
+          req.user.unique_id
+    );
+
+    res.json(result);
+  }
+);
+
+/* =========================================================
+   MESSAGES / HELP
+   ========================================================= */
+
+app.post(
+  "/api/messages",
+  requireAuth,
+  requireRole("patient"),
+  (req, res) => {
+    const {
+      hospital_name,
+      hospital_id,
       message,
-      created_at: new Date().toISOString()
+      case_id
+    } = req.body;
+
+    if (
+      !hospital_name ||
+      !message
+    ) {
+      return res.status(400).json({
+        error:
+          "Hospital name and message are required"
+      });
+    }
+
+    const item = {
+      id: nextMessageId++,
+      patient_id:
+        req.user.unique_id,
+      username:
+        req.user.username,
+      hospital_name:
+        String(hospital_name).trim(),
+      hospital_id:
+        cleanHospitalId(
+          hospital_id || ""
+        ),
+      case_id:
+        case_id || null,
+      message:
+        String(message).trim(),
+      created_at: now()
     };
 
-    messages.push(newMessage);
+    messages.push(item);
 
-    res.status(201).json(newMessage);
-
-  } catch (error) {
-    console.error("MESSAGE ERROR:", error);
-
-    res.status(500).json({
-      error: "Could not send message"
-    });
+    res.status(201).json(item);
   }
-});
+);
 
 
-app.get("/api/messages", requireAuth, (req, res) => {
-  if (req.user.role !== "nurse") {
-    return res.status(403).json({
-      error: "Only nurses can view messages"
-    });
+app.get(
+  "/api/messages",
+  requireAuth,
+  requireRole("nurse"),
+  (req, res) => {
+    const result = messages.filter(
+      (item) =>
+        item.hospital_id ===
+          req.user.hospital_id ||
+        (
+          !item.hospital_id &&
+          item.hospital_name
+            .toLowerCase() ===
+            req.user.hospital_name
+              .toLowerCase()
+        )
+    );
+
+    res.json(result);
   }
+);
 
-  const result = messages.filter(
-    message => message.hospital_id === req.user.hospital_id
-  );
-
-  res.json(result);
-});
-
-
-/* =========================
+/* =========================================================
    HISTORY
-   ========================= */
+   ========================================================= */
 
-app.get("/api/history", requireAuth, (req, res) => {
-  let result = [];
+app.get(
+  "/api/history",
+  requireAuth,
+  (req, res) => {
+    if (
+      req.user.role === "patient"
+    ) {
+      const registrations =
+        cases
+          .filter(
+            (item) =>
+              item.patient_id ===
+                req.user.unique_id
+          )
+          .map((item) => ({
+            ...item,
+            history_type:
+              "registration"
+          }));
 
-  if (req.user.role === "patient") {
-    result = cases.filter(
-      patientCase => patientCase.patient_id === req.user.unique_id
+      const ops =
+        appointments
+          .filter(
+            (item) =>
+              item.patient_id ===
+                req.user.unique_id
+          )
+          .map((item) => ({
+            ...item,
+            history_type:
+              "appointment"
+          }));
+
+      const combined =
+        [...registrations, ...ops]
+          .sort(
+            (a, b) =>
+              new Date(
+                b.created_at
+              ) -
+              new Date(
+                a.created_at
+              )
+          );
+
+      return res.json(combined);
+    }
+
+    const result = cases
+      .filter(
+        (item) =>
+          item.hospital_id ===
+            req.user.hospital_id ||
+          (
+            !item.hospital_id &&
+            item.hospital_name
+              .toLowerCase() ===
+              req.user.hospital_name
+                .toLowerCase()
+          )
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.updated_at) -
+          new Date(a.updated_at)
+      );
+
+    res.json(result);
+  }
+);
+
+/* =========================================================
+   HOSPITAL RISK SETTINGS
+   ========================================================= */
+
+app.get(
+  "/api/settings",
+  requireAuth,
+  requireRole("doctor"),
+  (req, res) => {
+    const key = hospitalKey(
+      req.user.hospital_name,
+      req.user.hospital_id
     );
-  } else {
-    result = cases.filter(
-      patientCase =>
-        patientCase.hospital_id === req.user.hospital_id
+
+    if (!hospitalSettingsStore[key]) {
+      hospitalSettingsStore[key] = {
+        low_max: 4,
+        medium_max: 6,
+        medium_review_minutes: 30
+      };
+    }
+
+    res.json(
+      hospitalSettingsStore[key]
     );
   }
-
-  result.sort(
-    (a, b) =>
-      new Date(b.updated_at) -
-      new Date(a.updated_at)
-  );
-
-  res.json(result);
-});
+);
 
 
-/* =========================
-   HOSPITAL SETTINGS
-   ========================= */
-
-app.get("/api/settings", requireAuth, (req, res) => {
-  if (req.user.role !== "doctor") {
-    return res.status(403).json({
-      error: "Only doctors can access hospital settings"
-    });
-  }
-
-  res.json(
-    hospitalSettings(req.user.hospital_id)
-  );
-});
-
-
-app.put("/api/settings", requireAuth, (req, res) => {
-  if (req.user.role !== "doctor") {
-    return res.status(403).json({
-      error: "Only doctors can change hospital settings"
-    });
-  }
-
-  const {
-    low_max,
-    medium_max,
-    medium_review_minutes
-  } = req.body;
-
-  settings[req.user.hospital_id] = {
-    low_max: Number(low_max),
-    medium_max: Number(medium_max),
-    medium_review_minutes: Number(
+app.put(
+  "/api/settings",
+  requireAuth,
+  requireRole("doctor"),
+  (req, res) => {
+    const {
+      low_max,
+      medium_max,
       medium_review_minutes
-    )
-  };
+    } = req.body;
 
-  res.json(
-    settings[req.user.hospital_id]
-  );
-});
+    if (
+      Number(low_max) >
+      Number(medium_max)
+    ) {
+      return res.status(400).json({
+        error:
+          "Low maximum cannot be greater than Medium maximum"
+      });
+    }
 
+    const key = hospitalKey(
+      req.user.hospital_name,
+      req.user.hospital_id
+    );
 
-/* =========================
-   SERVE FRONTEND
-   IMPORTANT: THIS MUST BE LAST
-   ========================= */
+    hospitalSettingsStore[key] = {
+      low_max:
+        Number(low_max),
+      medium_max:
+        Number(medium_max),
+      medium_review_minutes:
+        Number(
+          medium_review_minutes
+        )
+    };
+
+    res.json(
+      hospitalSettingsStore[key]
+    );
+  }
+);
+
+/* =========================================================
+   FRONTEND
+   THIS MUST STAY LAST
+   ========================================================= */
 
 app.use(express.static(__dirname));
 
 app.get("*", (req, res) => {
   res.sendFile(
-    path.join(__dirname, "index.html")
+    path.join(
+      __dirname,
+      "index.html"
+    )
   );
 });
 
-
-/* =========================
+/* =========================================================
    START SERVER
-   ========================= */
+   ========================================================= */
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`QTA running on ${PORT}`);
-});
+app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      `QTA running on port ${PORT}`
+    );
+  }
+);
