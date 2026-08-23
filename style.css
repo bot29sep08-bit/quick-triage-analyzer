@@ -1,1 +1,553 @@
-*{box-sizing:border-box}body{margin:0;background:#f7f3eb;color:#17323a;font:16px Arial}header{height:68px;background:white;border-bottom:1px solid #ddd;padding:0 6%;display:flex;align-items:center;justify-content:space-between;color:#176b6b;font-size:21px}header small{font-size:10px;letter-spacing:2px}main{max-width:1100px;margin:auto;padding:38px 20px}.hero h1{font:60px Georgia;margin:12px 0}.muted{color:#65747a}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}.card,.panel{background:#fff;border:1px solid #ddd;border-radius:16px;padding:22px;margin:12px 0}.role{cursor:pointer}.role:hover{border-color:#176b6b}.btn{background:#176b6b;color:#fff;border:0;border-radius:9px;padding:11px 16px;font-weight:bold;cursor:pointer}.btn.alt{background:#e8efed;color:#17323a}.nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}.nav button{padding:9px 12px;border:1px solid #ddd;background:white;border-radius:9px}input,select,textarea{width:100%;padding:11px;margin:5px 0 14px;border:1px solid #ccc;border-radius:8px}.auth{max-width:500px;margin:auto}.notice{background:#fff0e3;padding:14px;border-radius:9px}.risk{padding:5px 9px;border-radius:20px;font-weight:bold}.LOW{background:#e0f2e5}.MEDIUM{background:#fff0d8}.HIGH{background:#f8dddd}.case.HIGH{border-left:5px solid #b33}.case.MEDIUM{border-left:5px solid #b76a29}.case.LOW{border-left:5px solid #287c48}#toast{display:none;position:fixed;right:20px;bottom:20px;background:#17323a;color:white;padding:14px;border-radius:9px}@media(max-width:600px){.hero h1{font-size:42px}}
+/* =====================================================
+   QTA — HOSPITAL WEBSITE STYLE
+===================================================== */
+
+:root {
+  --primary: #0b6e69;
+  --primary-dark: #075451;
+  --primary-light: #e8f5f3;
+  --blue-light: #edf5fb;
+  --danger: #b42318;
+  --warning: #b54708;
+  --success: #067647;
+  --text: #182230;
+  --muted: #667085;
+  --border: #d0d5dd;
+  --bg: #f6f8fa;
+  --white: #ffffff;
+  --shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+}
+
+/* =====================================================
+   BASIC
+===================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+#app {
+  width: min(1100px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 60px;
+}
+
+/* =====================================================
+   HEADER / TOP BAR
+===================================================== */
+
+#bar {
+  min-height: 64px;
+  padding: 12px max(16px, calc((100vw - 1100px) / 2));
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.top-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 700;
+}
+
+/* =====================================================
+   HERO
+===================================================== */
+
+.hero {
+  padding: 55px 24px 35px;
+  text-align: center;
+}
+
+.hero small {
+  color: var(--primary);
+  font-weight: 800;
+  letter-spacing: 1.5px;
+}
+
+.hero h1 {
+  margin: 12px 0;
+  font-size: clamp(38px, 6vw, 70px);
+  line-height: 1.05;
+}
+
+.hero h1 i {
+  color: var(--primary);
+}
+
+.hero p {
+  max-width: 620px;
+  margin: 0 auto;
+  font-size: 18px;
+}
+
+/* =====================================================
+   GRID / CARDS
+===================================================== */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.card,
+.panel {
+  background: var(--white);
+  border: 1px solid #e4e7ec;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.card {
+  padding: 22px;
+  margin-bottom: 16px;
+}
+
+.role {
+  transition: 0.2s ease;
+}
+
+.role:hover {
+  transform: translateY(-4px);
+  border-color: var(--primary);
+}
+
+.role h2 {
+  margin-top: 0;
+}
+
+/* =====================================================
+   BUTTONS
+===================================================== */
+
+.btn {
+  border: none;
+  background: var(--primary);
+  color: white;
+  padding: 11px 18px;
+  border-radius: 9px;
+  font-weight: 700;
+  margin-top: 12px;
+  transition: 0.2s ease;
+}
+
+.btn:hover {
+  background: var(--primary-dark);
+}
+
+.btn.alt {
+  background: #eef2f6;
+  color: var(--text);
+}
+
+.btn.alt:hover {
+  background: #dde3ea;
+}
+
+.full {
+  width: 100%;
+}
+
+/* =====================================================
+   AUTH
+===================================================== */
+
+.auth {
+  width: min(560px, 100%);
+  margin: 35px auto;
+  padding: 28px;
+}
+
+.login-title,
+.register-title {
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 10px;
+  margin: 22px 0;
+}
+
+.auth-tabs button {
+  margin-top: 0;
+}
+
+/* =====================================================
+   FORMS
+===================================================== */
+
+.panel {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.form-section {
+  margin-top: 15px;
+}
+
+label {
+  display: block;
+  margin: 17px 0 7px;
+  font-weight: 700;
+  color: #344054;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 12px 13px;
+  background: white;
+  color: var(--text);
+  outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(11, 110, 105, 0.12);
+}
+
+textarea {
+  min-height: 105px;
+  resize: vertical;
+}
+
+/* =====================================================
+   PASSWORD EYE
+===================================================== */
+
+.password-wrap {
+  position: relative;
+}
+
+.password-wrap input {
+  padding-right: 50px;
+}
+
+.eye-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  padding: 6px 8px;
+}
+
+/* =====================================================
+   NAVIGATION
+===================================================== */
+
+.nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+  padding: 10px;
+  background: white;
+  border: 1px solid #e4e7ec;
+  border-radius: 13px;
+}
+
+.nav button {
+  border: none;
+  background: transparent;
+  color: #475467;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.nav button:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+/* =====================================================
+   CASES / HISTORY
+===================================================== */
+
+.case-card {
+  border-left: 4px solid var(--primary);
+}
+
+.clickable {
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.clickable:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.case-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.case-row h3 {
+  margin: 0 0 6px;
+}
+
+.case-row p {
+  margin: 0;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 11px 24px;
+  margin: 18px 0 8px;
+}
+
+.details-grid.large {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.details-grid span {
+  background: #f8fafc;
+  border: 1px solid #eaecf0;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.history-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0 22px;
+}
+
+.history-tabs .btn {
+  margin-top: 0;
+}
+
+.section-gap {
+  margin-top: 12px;
+}
+
+/* =====================================================
+   RISK LEVELS
+===================================================== */
+
+.risk,
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.risk.LOW {
+  background: #e7f8ef;
+  color: var(--success);
+}
+
+.risk.MEDIUM {
+  background: #fff4e5;
+  color: var(--warning);
+}
+
+.risk.HIGH {
+  background: #fee4e2;
+  color: var(--danger);
+}
+
+.status-pill {
+  background: #eef2f6;
+  color: #475467;
+}
+
+/* =====================================================
+   NOTICES
+===================================================== */
+
+.notice {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  line-height: 1.5;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 13px;
+}
+
+.disclaimer-bottom {
+  text-align: center;
+  margin-top: 35px;
+}
+
+/* =====================================================
+   APPOINTMENTS
+===================================================== */
+
+.appointment-card {
+  border-left: 4px solid #3478c5;
+}
+
+.appointment-result {
+  text-align: center;
+}
+
+.big-op {
+  font-size: 42px;
+  font-weight: 900;
+  color: var(--primary);
+  margin: 25px 0;
+  padding: 20px;
+  background: var(--primary-light);
+  border-radius: 14px;
+}
+
+/* =====================================================
+   DOCTOR
+===================================================== */
+
+.doctor-case {
+  border-top: 3px solid var(--primary);
+}
+
+.result-card {
+  margin-top: 22px;
+  border: 1px solid var(--border);
+}
+
+.result-card h2 {
+  margin-top: 0;
+}
+
+/* =====================================================
+   GENERAL
+===================================================== */
+
+hr {
+  border: none;
+  border-top: 1px solid #eaecf0;
+  margin: 28px 0;
+}
+
+h1,
+h2,
+h3 {
+  color: #182230;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+small {
+  color: var(--muted);
+}
+
+/* =====================================================
+   TOAST
+===================================================== */
+
+#toast {
+  display: none;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  background: #182230;
+  color: white;
+  padding: 13px 18px;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+/* =====================================================
+   MOBILE
+===================================================== */
+
+@media (max-width: 800px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .details-grid,
+  .details-grid.large {
+    grid-template-columns: 1fr;
+  }
+
+  #app {
+    width: min(100% - 20px, 1100px);
+    padding-top: 20px;
+  }
+
+  .panel,
+  .auth,
+  .card {
+    padding: 18px;
+  }
+
+  .nav {
+    gap: 4px;
+  }
+
+  .nav button {
+    padding: 9px 10px;
+    font-size: 13px;
+  }
+
+  .case-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .hero {
+    padding-top: 30px;
+  }
+}
