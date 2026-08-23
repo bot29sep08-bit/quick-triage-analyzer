@@ -1,118 +1,213 @@
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
 
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
-/* =========================================================
-   TEMPORARY DATA STORE
-   ========================================================= */
+const PORT = process.env.PORT || 3000;
+const SECRET = process.env.JWT_SECRET || "qta-secret-key-change-in-production";
 
-let users = [];
-let cases = [];
-let appointments = [];
-let messages = [];
-let documents = [];
-let hospitalSettingsStore = {};
+const DB_FILE = path.join(__dirname, "database.json");
 
-let nextUserNumber = 1;
-let nextCaseId = 1;
-let nextAppointmentId = 1;
-let nextMessageId = 1;
-let nextDocumentId = 1;
+/* =====================================================
+   DATABASE
+===================================================== */
 
-/* =========================================================
+function defaultDB() {
+  return {
+    users: [],
+    cases: [],
+    appointments: [],
+    messages: [],
+    settings: {}
+  };
+}
+
+function loadDB() {
+  try {
+    if (!fs.existsSync(DB_FILE)) {
+      const db = defaultDB();
+      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+      return db;
+    }
+
+    const db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+
+    return {
+      ...defaultDB(),
+      ...db,
+      users: Array.isArray(db.users) ? db.users : [],
+      cases: Array.isArray(db.cases) ? db.cases : [],
+      appointments: Array.isArray(db.appointments) ? db.appointments : [],
+      messages: Array.isArray(db.messages) ? db.messages : [],
+      settings: db.settings || {}
+    };
+  } catch (error) {
+    console.error("Database load error:", error);
+    return defaultDB();
+  }
+}
+
+let db = loadDB();
+
+function saveDB() {
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+}
+
+function nextId(list) {
+  if (!list.length) return 1;
+  return Math.max(...list.map(x => Number(x.id) || 0)) + 1;
+}
+
+/* =====================================================
    HELPERS
-   ========================================================= */
+===================================================== */
 
 function now() {
   return new Date().toISOString();
 }
 
-function cleanHospitalId(value = "") {
-  return String(value).trim().toUpperCase();
+function clean(value) {
+  return String(value || "").trim();
 }
 
-function makeToken(user) {
-  return `qta-${user.id}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
+function randomDigits(length) {
+  let result = "";
+
+  for (let i = 0; i < length; i++) {
+    result += Math.floor(Math.random() * 10);
+  }
+
+  return result;
 }
 
-function randomSixDigits() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+function isValidHospitalId(id) {
+  return /^[A-Z]{2}\d{2}$/.test(id);
 }
 
-/*
- Patient ID: 10 numeric digits
+function generateUniqueId(role, hospitalId = "") {
+  let id = "";
 
- Nurse ID: 10 characters:
- first 6 digits + last 4 = Hospital ID
- Example: 583921AP12
-
- Doctor ID: 10 characters:
- first 4 = Hospital ID + last 6 digits
- Example: AP12583921
-*/
-function createUniqueId(role, hospitalId = "") {
-  if (role === "patient") {
-    let id;
-
-    do {
+  do {
+    if (role === "nurse") {
+      /*
+        10 digits total.
+        Hospital ID is represented by its 2 numeric digits
+        plus a generated numeric part.
+      */
+      const numericHospital = hospitalId.replace(/[A-Z]/g, "");
       id =
-        String(Date.now()).slice(-6) +
-        String(nextUserNumber).padStart(4, "0");
-    } while (users.some((u) => u.unique_id === id));
+        randomDigits(6) +
+        randomDigits(2) +
+        numericHospital;
+    } else if (role === "doctor") {
+      /*
+        Doctor ID must be 10 digits.
+        We create a stable numeric prefix derived from hospital ID.
+      */
+      const letters = hospitalId.slice(0, 2);
+      const digits = hospitalId.slice(2, 4);
 
-    return id;
-  }
+      const letterNumbers =
+        letters
+          .split("")
+          .map(letter =>
+            String(letter.charCodeAt(0) - 64).padStart(2, "0")
+          )
+          .join("");
 
-  const six = randomSixDigits();
-  const hospital = cleanHospitalId(hospitalId);
-
-  let id =
-    role === "nurse"
-      ? six + hospital
-      : hospital + six;
-
-  while (users.some((u) => u.unique_id === id)) {
-    const newSix = randomSixDigits();
-
-    id =
-      role === "nurse"
-        ? newSix + hospital
-        : hospital + newSix;
-  }
+      id =
+        (letterNumbers + digits + randomDigits(10))
+          .slice(0, 10);
+    } else {
+      id = randomDigits(10);
+    }
+  } while (db.users.some(user => user.unique_id === id));
 
   return id;
 }
 
-function getUserFromRequest(req) {
-  const auth = req.headers.authorization || "";
+function getHospitalKey(hospitalName, hospitalId) {
+  const name = clean(hospitalName).toLowerCase();
+  const id = clean(hospitalId).toUpperCase();
 
-  if (!auth.startsWith("Bearer ")) return null;
-
-  const token = auth.replace("Bearer ", "");
-
-  return users.find((user) => user.token === token) || null;
+  return id || name;
 }
 
-function requireAuth(req, res, next) {
-  const user = getUserFromRequest(req);
+function findUserById(uniqueId) {
+  return db.users.find(user => user.unique_id === uniqueId);
+}
 
-  if (!user) {
+function publicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    unique_id: user.unique_id,
+    role: user.role,
+    mobile: user.mobile || "",
+    email: user.email || "",
+    age: user.age || "",
+    hospital_name: user.hospital_name || "",
+    hospital_id: user.hospital_id || ""
+  };
+}
+
+function makeToken(user) {
+  return jwt.sign(
+    {
+      id: user.id,
+      role: user.role,
+      unique_id: user.unique_id
+    },
+    SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+/* =====================================================
+   AUTH MIDDLEWARE
+===================================================== */
+
+function auth(req, res, next) {
+  try {
+    const header = req.headers.authorization || "";
+
+    if (!header.startsWith("Bearer ")) {
+      return res.status(401).json({
+        error: "Authentication required"
+      });
+    }
+
+    const token = header.slice(7);
+
+    const decoded = jwt.verify(token, SECRET);
+
+    const user = db.users.find(
+      item => item.id === decoded.id
+    );
+
+    if (!user) {
+      return res.status(401).json({
+        error: "User account not found"
+      });
+    }
+
+    req.user = user;
+
+    next();
+
+  } catch (error) {
     return res.status(401).json({
-      error: "Please sign in first"
+      error: "Invalid or expired login"
     });
   }
-
-  req.user = user;
-  next();
 }
 
-function requireRole(...roles) {
+function roleOnly(...roles) {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
@@ -124,62 +219,9 @@ function requireRole(...roles) {
   };
 }
 
-function hospitalKey(name = "", id = "") {
-  return cleanHospitalId(id) || String(name).trim().toLowerCase();
-}
-
-function getHospitalSettings(caseItem) {
-  const key = hospitalKey(
-    caseItem.hospital_name,
-    caseItem.hospital_id
-  );
-
-  if (!hospitalSettingsStore[key]) {
-    hospitalSettingsStore[key] = {
-      low_max: 4,
-      medium_max: 6,
-      medium_review_minutes: 30
-    };
-  }
-
-  return hospitalSettingsStore[key];
-}
-
-function calculateRiskMinutes(risk) {
-  if (risk === "HIGH") return 15;
-  if (risk === "LOW") return 5;
-  if (risk === "MEDIUM") return 5;
-
-  return 10;
-}
-
-function sortRisk(a, b) {
-  const priority = {
-    HIGH: 1,
-    MEDIUM: 2,
-    LOW: 3
-  };
-
-  return (
-    (priority[a.risk_level] || 4) -
-    (priority[b.risk_level] || 4)
-  );
-}
-
-/* =========================================================
-   HEALTH
-   ========================================================= */
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    message: "Quick Triage Analyzer backend is running"
-  });
-});
-
-/* =========================================================
-   AUTH — DUPLICATE USERNAMES ALLOWED
-   ========================================================= */
+/* =====================================================
+   REGISTER
+===================================================== */
 
 app.post("/api/auth/register", (req, res) => {
   try {
@@ -194,563 +236,600 @@ app.post("/api/auth/register", (req, res) => {
       hospital_id
     } = req.body;
 
-    if (!role || !username || !password || !mobile) {
-      return res.status(400).json({
-        error: "Please fill all required fields"
-      });
-    }
-
     if (!["patient", "nurse", "doctor"].includes(role)) {
       return res.status(400).json({
         error: "Invalid account type"
       });
     }
 
-    if (role === "patient" && !age) {
+    if (!clean(username)) {
       return res.status(400).json({
-        error: "Age is required for patient registration"
+        error: "Username is required"
       });
     }
 
-    if (role === "nurse" || role === "doctor") {
-      if (!hospital_name || !hospital_id) {
+    if (clean(password).length < 4) {
+      return res.status(400).json({
+        error: "Password must contain at least 4 characters"
+      });
+    }
+
+    if (!clean(mobile)) {
+      return res.status(400).json({
+        error: "Mobile number is required"
+      });
+    }
+
+    let finalHospitalName = "";
+    let finalHospitalId = "";
+
+    if (role === "patient") {
+      const patientAge = Number(age);
+
+      if (
+        !Number.isFinite(patientAge) ||
+        patientAge < 0 ||
+        patientAge > 130
+      ) {
         return res.status(400).json({
-          error: "Hospital name and Hospital ID are required"
+          error: "Please enter a valid age"
+        });
+      }
+    } else {
+      finalHospitalName = clean(hospital_name);
+
+      finalHospitalId =
+        clean(hospital_id).toUpperCase();
+
+      if (!finalHospitalName) {
+        return res.status(400).json({
+          error: "Hospital name is required"
         });
       }
 
-      const hospital = cleanHospitalId(hospital_id);
-
-      if (!/^[A-Z]{2}\d{2}$/.test(hospital)) {
+      if (!isValidHospitalId(finalHospitalId)) {
         return res.status(400).json({
           error:
-            "Hospital ID must contain 2 letters and 2 numbers, for example AP12"
+            "Hospital ID must contain 2 letters followed by 2 digits. Example: AP12"
         });
       }
     }
 
-    const uniqueId = createUniqueId(
+    /*
+      IMPORTANT:
+      Username does NOT need to be unique.
+      Multiple patients, nurses or doctors may use the same username.
+      The unique 10 digit ID separates accounts.
+    */
+
+    const uniqueId = generateUniqueId(
       role,
-      role === "patient" ? "" : hospital_id
+      finalHospitalId
     );
 
     const user = {
-      id: nextUserNumber++,
-      unique_id: uniqueId,
-      role,
-      username: String(username).trim(),
+      id: nextId(db.users),
+
+      username: clean(username),
+
       password: String(password),
-      mobile: String(mobile).trim(),
-      email: String(email || "").trim(),
+
+      unique_id: uniqueId,
+
+      role,
+
+      mobile: clean(mobile),
+
+      email: clean(email),
+
       age:
         role === "patient"
           ? Number(age)
           : null,
+
       hospital_name:
         role !== "patient"
-          ? String(hospital_name).trim()
-          : null,
+          ? finalHospitalName
+          : "",
+
       hospital_id:
         role !== "patient"
-          ? cleanHospitalId(hospital_id)
-          : null,
-      created_at: now(),
-      token: null
+          ? finalHospitalId
+          : "",
+
+      created_at: now()
     };
 
+    db.users.push(user);
+
+    saveDB();
+
     const token = makeToken(user);
-    user.token = token;
 
-    users.push(user);
-
-    res.status(201).json({
-      token,
-      user: publicUser(user)
+    return res.status(201).json({
+      user: publicUser(user),
+      token
     });
 
   } catch (error) {
-    console.error("REGISTER ERROR:", error);
+    console.error(error);
 
-    res.status(500).json({
-      error: "Registration failed"
+    return res.status(500).json({
+      error: "Unable to create account"
     });
   }
 });
 
+/* =====================================================
+   LOGIN
+===================================================== */
 
 app.post("/api/auth/login", (req, res) => {
-  try {
-    const {
-      role,
-      username,
-      password,
-      unique_id
-    } = req.body;
+  const {
+    role,
+    username,
+    password,
+    unique_id
+  } = req.body;
+
+  const user = db.users.find(item =>
+    item.role === role &&
+    item.username === clean(username) &&
+    item.password === String(password) &&
+    item.unique_id === clean(unique_id)
+  );
+
+  if (!user) {
+    return res.status(401).json({
+      error:
+        "Username, password, unique ID or account type is incorrect"
+    });
+  }
+
+  return res.json({
+    user: publicUser(user),
+    token: makeToken(user)
+  });
+});
+
+/* =====================================================
+   PROFILE
+===================================================== */
+
+app.put("/api/profile", auth, (req, res) => {
+  const user = req.user;
+
+  const {
+    username,
+    mobile,
+    email,
+    age,
+    hospital_name,
+    hospital_id
+  } = req.body;
+
+  if (!clean(username)) {
+    return res.status(400).json({
+      error: "Username cannot be empty"
+    });
+  }
+
+  if (!clean(mobile)) {
+    return res.status(400).json({
+      error: "Mobile number cannot be empty"
+    });
+  }
+
+  user.username = clean(username);
+  user.mobile = clean(mobile);
+  user.email = clean(email);
+
+  if (user.role === "patient") {
+    const patientAge = Number(age);
 
     if (
-      !role ||
-      !username ||
-      !password ||
-      !unique_id
+      !Number.isFinite(patientAge) ||
+      patientAge < 0 ||
+      patientAge > 130
+    ) {
+      return res.status(400).json({
+        error: "Please enter a valid age"
+      });
+    }
+
+    user.age = patientAge;
+  } else {
+    const newHospitalName = clean(hospital_name);
+    const newHospitalId =
+      clean(hospital_id).toUpperCase();
+
+    if (!newHospitalName) {
+      return res.status(400).json({
+        error: "Hospital name cannot be empty"
+      });
+    }
+
+    if (!isValidHospitalId(newHospitalId)) {
+      return res.status(400).json({
+        error: "Invalid hospital ID"
+      });
+    }
+
+    user.hospital_name = newHospitalName;
+    user.hospital_id = newHospitalId;
+  }
+
+  saveDB();
+
+  return res.json({
+    user: publicUser(user)
+  });
+});
+
+/* =====================================================
+   CREATE PATIENT REGISTRATION
+===================================================== */
+
+app.post(
+  "/api/cases",
+  auth,
+  roleOnly("patient"),
+  (req, res) => {
+    const {
+      patient_name,
+      age,
+      problem,
+      hospital_name,
+      hospital_id,
+      location_status
+    } = req.body;
+
+    if (!clean(patient_name)) {
+      return res.status(400).json({
+        error: "Patient name is required"
+      });
+    }
+
+    const patientAge = Number(age);
+
+    if (
+      !Number.isFinite(patientAge) ||
+      patientAge < 0 ||
+      patientAge > 130
+    ) {
+      return res.status(400).json({
+        error: "Please enter a valid age"
+      });
+    }
+
+    if (!clean(problem)) {
+      return res.status(400).json({
+        error: "Please describe the health problem"
+      });
+    }
+
+    if (!clean(hospital_name)) {
+      return res.status(400).json({
+        error: "Hospital name is required"
+      });
+    }
+
+    const finalHospitalId =
+      clean(hospital_id).toUpperCase();
+
+    if (
+      finalHospitalId &&
+      !isValidHospitalId(finalHospitalId)
     ) {
       return res.status(400).json({
         error:
-          "Username, Unique ID and password are required"
+          "Hospital ID must look like AP12 or can be left empty"
       });
     }
 
-    const user = users.find(
-      (item) =>
-        item.role === role &&
-        item.username === String(username).trim() &&
-        item.unique_id ===
-          String(unique_id).trim().toUpperCase() &&
-        item.password === String(password)
-    );
+    const item = {
+      id: nextId(db.cases),
 
-    if (!user) {
-      return res.status(401).json({
-        error:
-          "Username, Unique ID or password is incorrect"
-      });
-    }
+      type: "registration",
 
-    const token = makeToken(user);
-    user.token = token;
+      patient_id: req.user.unique_id,
 
-    res.json({
-      token,
-      user: publicUser(user)
-    });
+      patient_name: clean(patient_name),
 
-  } catch (error) {
-    console.error("LOGIN ERROR:", error);
+      age: patientAge,
 
-    res.status(500).json({
-      error: "Login failed"
-    });
+      problem: clean(problem),
+
+      hospital_name: clean(hospital_name),
+
+      hospital_id: finalHospitalId,
+
+      location_status:
+        location_status === "away"
+          ? "away"
+          : "in_hospital",
+
+      risk_level: null,
+
+      news_score: null,
+
+      status: "registered",
+
+      doctor_notes: "",
+
+      medical_slip: "",
+
+      created_at: now(),
+
+      updated_at: now()
+    };
+
+    db.cases.push(item);
+
+    saveDB();
+
+    return res.status(201).json(item);
   }
-});
+);
 
-function publicUser(user) {
-  return {
-    id: user.id,
-    unique_id: user.unique_id,
-    role: user.role,
-    username: user.username,
-    mobile: user.mobile,
-    email: user.email,
-    age: user.age,
-    hospital_name: user.hospital_name,
-    hospital_id: user.hospital_id,
-    created_at: user.created_at
-  };
-}
+/* =====================================================
+   PATIENT CASE HISTORY
+===================================================== */
 
-/* =========================================================
-   PROFILE
-   ========================================================= */
+app.get(
+  "/api/cases/my",
+  auth,
+  roleOnly("patient"),
+  (req, res) => {
+    const registrations =
+      db.cases
+        .filter(item =>
+          item.patient_id === req.user.unique_id
+        )
+        .map(item => ({
+          ...item,
+          type: "registration"
+        }));
 
-app.get("/api/profile", requireAuth, (req, res) => {
-  res.json(publicUser(req.user));
-});
+    const appointments =
+      db.appointments
+        .filter(item =>
+          item.patient_id === req.user.unique_id
+        )
+        .map(item => ({
+          ...item,
+          type: "appointment",
+          updated_at:
+            item.updated_at ||
+            item.created_at
+        }));
 
+    const all =
+      [...registrations, ...appointments]
+        .sort((a, b) =>
+          new Date(b.updated_at) -
+          new Date(a.updated_at)
+        );
 
-app.put("/api/profile", requireAuth, (req, res) => {
-  const {
-    mobile,
-    email,
-    age
-  } = req.body;
-
-  if (mobile) {
-    req.user.mobile = String(mobile).trim();
+    return res.json(all);
   }
+);
 
-  if (email !== undefined) {
-    req.user.email = String(email).trim();
+/* =====================================================
+   GET ONE CASE
+===================================================== */
+
+app.get("/api/cases/:id", auth, (req, res) => {
+  const id = Number(req.params.id);
+
+  const item = db.cases.find(
+    x => x.id === id
+  );
+
+  if (!item) {
+    return res.status(404).json({
+      error: "Registration not found"
+    });
   }
 
   if (
     req.user.role === "patient" &&
-    age
+    item.patient_id !== req.user.unique_id
   ) {
-    req.user.age = Number(age);
+    return res.status(403).json({
+      error: "You cannot access this registration"
+    });
   }
 
-  res.json(publicUser(req.user));
+  return res.json(item);
 });
 
+/* =====================================================
+   NURSE CASE LIST
+===================================================== */
 
-app.put("/api/profile/password", requireAuth, (req, res) => {
-  const {
-    current_password,
-    new_password
-  } = req.body;
+app.get(
+  "/api/cases",
+  auth,
+  roleOnly("nurse"),
+  (req, res) => {
+    const list =
+      db.cases
+        .filter(item => {
+          if (!item.hospital_id) {
+            return (
+              clean(item.hospital_name)
+                .toLowerCase() ===
+              clean(req.user.hospital_name)
+                .toLowerCase()
+            );
+          }
+
+          return (
+            item.hospital_id ===
+            req.user.hospital_id
+          );
+        })
+        .sort((a, b) =>
+          new Date(b.created_at) -
+          new Date(a.created_at)
+        );
+
+    return res.json(list);
+  }
+);
+
+/* =====================================================
+   TRIAGE CALCULATION
+===================================================== */
+
+function calculateRisk({
+  rr,
+  spo2,
+  sbp,
+  heart_rate,
+  consciousness,
+  temperature
+}) {
+  let score = 0;
+
+  rr = Number(rr);
+  spo2 = Number(spo2);
+  sbp = Number(sbp);
+  heart_rate = Number(heart_rate);
+  temperature = Number(temperature);
+
+  if (rr <= 8 || rr >= 25) score += 3;
+  else if (rr >= 21) score += 2;
+  else if (rr >= 9 && rr <= 11) score += 1;
+
+  if (spo2 <= 91) score += 3;
+  else if (spo2 <= 93) score += 2;
+  else if (spo2 <= 95) score += 1;
+
+  if (sbp <= 90) score += 3;
+  else if (sbp <= 100) score += 2;
+
+  if (heart_rate <= 40 || heart_rate >= 131) score += 3;
+  else if (heart_rate >= 111) score += 2;
+  else if (heart_rate >= 91) score += 1;
 
   if (
-    !current_password ||
-    !new_password
+    consciousness !== "Alert"
   ) {
-    return res.status(400).json({
-      error:
-        "Current password and new password are required"
-    });
+    score += 3;
   }
 
-  if (
-    req.user.password !== current_password
+  if (temperature <= 35 || temperature >= 39.1) {
+    score += 2;
+  } else if (
+    temperature >= 38.1 &&
+    temperature <= 39
   ) {
-    return res.status(400).json({
-      error: "Current password is incorrect"
-    });
+    score += 1;
   }
 
-  if (new_password.length < 4) {
-    return res.status(400).json({
-      error:
-        "New password must contain at least 4 characters"
-    });
+  return score;
+}
+
+function riskFromScore(score, hospitalId) {
+  const settings =
+    db.settings[hospitalId] || {
+      low_max: 4,
+      medium_max: 6
+    };
+
+  if (score <= Number(settings.low_max)) {
+    return "LOW";
   }
 
-  req.user.password = new_password;
+  if (score <= Number(settings.medium_max)) {
+    return "MEDIUM";
+  }
 
-  res.json({
-    message: "Password changed successfully"
-  });
-});
+  return "HIGH";
+}
 
-/* =========================================================
-   PATIENT QUICK REGISTRATION
-   ========================================================= */
+/* =====================================================
+   NURSE TRIAGE
+===================================================== */
 
 app.post(
-  "/api/cases",
-  requireAuth,
-  requireRole("patient"),
+  "/api/cases/:id/triage",
+  auth,
+  roleOnly("nurse"),
   (req, res) => {
-    try {
-      const {
-        patient_name,
-        age,
-        problem,
-        location_status,
-        hospital_name,
-        hospital_id
-      } = req.body;
+    const id = Number(req.params.id);
 
-      if (
-        !patient_name ||
-        !age ||
-        !problem ||
-        !location_status ||
-        !hospital_name
-      ) {
-        return res.status(400).json({
-          error:
-            "Please fill patient name, age, problem, location and hospital name"
-        });
-      }
-
-      const patientCase = {
-        id: nextCaseId++,
-        patient_id: req.user.unique_id,
-        patient_name: String(patient_name).trim(),
-        age: Number(age),
-        problem: String(problem).trim(),
-        location_status,
-        hospital_name:
-          String(hospital_name).trim(),
-        hospital_id:
-          cleanHospitalId(hospital_id || ""),
-        risk_level: null,
-        news_score: null,
-        vitals: null,
-        status: "registered",
-        transferred_to_doctor: false,
-        doctor_notes: "",
-        created_at: now(),
-        updated_at: now()
-      };
-
-      cases.push(patientCase);
-
-      res.status(201).json(patientCase);
-
-    } catch (error) {
-      console.error("CASE ERROR:", error);
-
-      res.status(500).json({
-        error: "Could not save registration"
-      });
-    }
-  }
-);
-
-
-/* =========================================================
-   CASE LISTS
-   ========================================================= */
-
-app.get(
-  "/api/cases/my",
-  requireAuth,
-  requireRole("patient"),
-  (req, res) => {
-    const result = cases
-      .filter(
-        (item) =>
-          item.patient_id === req.user.unique_id
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.created_at) -
-          new Date(a.created_at)
-      );
-
-    res.json(result);
-  }
-);
-
-
-app.get(
-  "/api/cases",
-  requireAuth,
-  requireRole("nurse", "doctor"),
-  (req, res) => {
-    const result = cases
-      .filter(
-        (item) =>
-          (
-            item.hospital_id &&
-            item.hospital_id ===
-              req.user.hospital_id
-          ) ||
-          (
-            !item.hospital_id &&
-            item.hospital_name
-              .toLowerCase() ===
-              req.user.hospital_name
-                .toLowerCase()
-          )
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.created_at) -
-          new Date(a.created_at)
-      );
-
-    res.json(result);
-  }
-);
-
-
-app.get(
-  "/api/cases/:id",
-  requireAuth,
-  (req, res) => {
-    const item = cases.find(
-      (caseItem) =>
-        caseItem.id === Number(req.params.id)
+    const item = db.cases.find(
+      x => x.id === id
     );
 
     if (!item) {
       return res.status(404).json({
-        error: "Registration not found"
+        error: "Patient registration not found"
       });
     }
 
-    const allowed =
-      req.user.role === "patient"
-        ? item.patient_id === req.user.unique_id
-        : (
-            item.hospital_id ===
-              req.user.hospital_id ||
-            item.hospital_name
-              .toLowerCase() ===
-              req.user.hospital_name
-                .toLowerCase()
-          );
+    const required = [
+      "rr",
+      "spo2",
+      "sbp",
+      "heart_rate",
+      "temperature"
+    ];
 
-    if (!allowed) {
-      return res.status(403).json({
-        error: "Access denied"
-      });
-    }
-
-    res.json(item);
-  }
-);
-
-/* =========================================================
-   TRIAGE — SIX VITALS
-   ========================================================= */
-
-app.post(
-  "/api/cases/:id/triage",
-  requireAuth,
-  requireRole("nurse"),
-  (req, res) => {
-    try {
-      const item = cases.find(
-        (caseItem) =>
-          caseItem.id === Number(req.params.id)
-      );
-
-      if (!item) {
-        return res.status(404).json({
-          error: "Patient registration not found"
-        });
-      }
-
-      const {
-        rr,
-        spo2,
-        sbp,
-        heart_rate,
-        consciousness,
-        temperature
-      } = req.body;
-
-      const respiration = Number(rr);
-      const oxygen = Number(spo2);
-      const bloodPressure = Number(sbp);
-      const heartRate = Number(heart_rate);
-      const temp = Number(temperature);
-
+    for (const field of required) {
       if (
-        !respiration ||
-        !oxygen ||
-        !bloodPressure ||
-        !heartRate ||
-        !consciousness ||
-        Number.isNaN(temp)
+        req.body[field] === "" ||
+        req.body[field] === undefined
       ) {
         return res.status(400).json({
-          error:
-            "Please enter all six vital measurements"
+          error: "Please enter all six vital measurements"
         });
       }
-
-      let score = 0;
-
-      if (
-        respiration <= 8 ||
-        respiration >= 25
-      ) {
-        score += 3;
-      } else if (respiration >= 21) {
-        score += 1;
-      }
-
-      if (oxygen <= 91) {
-        score += 3;
-      } else if (oxygen <= 93) {
-        score += 2;
-      } else if (oxygen <= 95) {
-        score += 1;
-      }
-
-      if (bloodPressure <= 90) {
-        score += 3;
-      } else if (bloodPressure <= 100) {
-        score += 2;
-      } else if (bloodPressure <= 110) {
-        score += 1;
-      }
-
-      if (
-        heartRate <= 40 ||
-        heartRate >= 131
-      ) {
-        score += 3;
-      } else if (heartRate >= 111) {
-        score += 2;
-      } else if (heartRate >= 91) {
-        score += 1;
-      }
-
-      if (
-        consciousness !== "Alert"
-      ) {
-        score += 3;
-      }
-
-      if (
-        temp < 35 ||
-        temp >= 39.1
-      ) {
-        score += 3;
-      } else if (temp >= 38.1) {
-        score += 1;
-      }
-
-      const setting =
-        getHospitalSettings(item);
-
-      let risk;
-
-      if (score <= setting.low_max) {
-        risk = "LOW";
-      } else if (
-        score <= setting.medium_max
-      ) {
-        risk = "MEDIUM";
-      } else {
-        risk = "HIGH";
-      }
-
-      item.news_score = score;
-      item.risk_level = risk;
-
-      item.vitals = {
-        respiration_rate: respiration,
-        spo2: oxygen,
-        systolic_bp: bloodPressure,
-        heart_rate: heartRate,
-        consciousness,
-        temperature: temp
-      };
-
-      item.updated_at = now();
-
-      if (risk === "HIGH") {
-        item.transferred_to_doctor = true;
-        item.status = "high_priority";
-      } else {
-        item.status = "triaged";
-      }
-
-      res.json({
-        score,
-        risk,
-        case: item
-      });
-
-    } catch (error) {
-      console.error("TRIAGE ERROR:", error);
-
-      res.status(500).json({
-        error:
-          "Could not complete triage analysis"
-      });
     }
+
+    const score =
+      calculateRisk(req.body);
+
+    const hospitalId =
+      item.hospital_id ||
+      req.user.hospital_id;
+
+    const risk =
+      riskFromScore(score, hospitalId);
+
+    item.news_score = score;
+    item.risk_level = risk;
+
+    item.status =
+      risk === "HIGH"
+        ? "priority_doctor_review"
+        : "checked";
+
+    item.updated_at = now();
+
+    saveDB();
+
+    return res.json({
+      score,
+      risk
+    });
   }
 );
 
-
-/* =========================================================
-   TRANSFER TO DOCTOR
-   ========================================================= */
+/* =====================================================
+   NURSE TRANSFER
+===================================================== */
 
 app.post(
   "/api/cases/:id/transfer",
-  requireAuth,
-  requireRole("nurse"),
+  auth,
+  roleOnly("nurse"),
   (req, res) => {
-    const item = cases.find(
-      (caseItem) =>
-        caseItem.id === Number(req.params.id)
+    const item = db.cases.find(
+      x => x.id === Number(req.params.id)
     );
 
     if (!item) {
@@ -759,598 +838,505 @@ app.post(
       });
     }
 
-    item.transferred_to_doctor = true;
-    item.status = "transferred";
+    item.status = "doctor_review";
     item.updated_at = now();
 
-    res.json({
+    saveDB();
+
+    return res.json({
+      success: true
+    });
+  }
+);
+
+/* =====================================================
+   APPOINTMENT QUEUE COUNT
+===================================================== */
+
+app.get(
+  "/api/appointments/queue",
+  auth,
+  roleOnly("patient"),
+  (req, res) => {
+    const hospitalName =
+      clean(req.query.hospital_name);
+
+    const hospitalId =
+      clean(req.query.hospital_id)
+        .toUpperCase();
+
+    if (!hospitalName) {
+      return res.status(400).json({
+        error: "Hospital name is required"
+      });
+    }
+
+    const key =
+      getHospitalKey(
+        hospitalName,
+        hospitalId
+      );
+
+    const active =
+      db.appointments.filter(item =>
+        item.hospital_key === key &&
+        !["completed", "cancelled"].includes(item.status)
+      );
+
+    return res.json({
+      before: active.length
+    });
+  }
+);
+
+/* =====================================================
+   CREATE APPOINTMENT
+===================================================== */
+
+app.post(
+  "/api/appointments",
+  auth,
+  roleOnly("patient"),
+  (req, res) => {
+    const {
+      hospital_name,
+      hospital_id,
+      preferred_date,
+      preferred_time
+    } = req.body;
+
+    const hospitalName =
+      clean(hospital_name);
+
+    const hospitalId =
+      clean(hospital_id).toUpperCase();
+
+    if (!hospitalName) {
+      return res.status(400).json({
+        error: "Hospital name is required"
+      });
+    }
+
+    if (
+      hospitalId &&
+      !isValidHospitalId(hospitalId)
+    ) {
+      return res.status(400).json({
+        error:
+          "Invalid hospital ID"
+      });
+    }
+
+    if (!clean(preferred_date)) {
+      return res.status(400).json({
+        error: "Please select appointment date"
+      });
+    }
+
+    if (!clean(preferred_time)) {
+      return res.status(400).json({
+        error: "Please select appointment time"
+      });
+    }
+
+    const key =
+      getHospitalKey(
+        hospitalName,
+        hospitalId
+      );
+
+    const active =
+      db.appointments
+        .filter(item =>
+          item.hospital_key === key &&
+          !["completed", "cancelled"].includes(item.status)
+        )
+        .sort((a, b) =>
+          Number(a.op_number) -
+          Number(b.op_number)
+        );
+
+    const before = active.length;
+
+    const opNumber =
+      active.length
+        ? Math.max(
+            ...active.map(
+              x => Number(x.op_number)
+            )
+          ) + 1
+        : 1;
+
+    /*
+      Default estimation:
+      Low/medium patient = 5 minutes
+      High risk patient = 15 minutes
+
+      At appointment creation the patient has not yet
+      been triaged, so we estimate using 5 minutes each.
+    */
+
+    const estimatedMinutes =
+      before * 5;
+
+    const appointment = {
+      id: nextId(db.appointments),
+
+      type: "appointment",
+
+      patient_id: req.user.unique_id,
+
+      patient_name: req.user.username,
+
+      hospital_name: hospitalName,
+
+      hospital_id: hospitalId,
+
+      hospital_key: key,
+
+      op_number: opNumber,
+
+      preferred_date:
+        clean(preferred_date),
+
+      preferred_time:
+        clean(preferred_time),
+
+      estimated_minutes:
+        estimatedMinutes,
+
+      status: "waiting",
+
+      created_at: now(),
+
+      updated_at: now()
+    };
+
+    db.appointments.push(appointment);
+
+    saveDB();
+
+    return res.status(201).json({
+      op_number: opNumber,
+      before,
+      estimated_minutes: estimatedMinutes,
+      appointment
+    });
+  }
+);
+
+/* =====================================================
+   NURSE APPOINTMENT LIST
+===================================================== */
+
+app.get(
+  "/api/appointments",
+  auth,
+  roleOnly("nurse"),
+  (req, res) => {
+    const list =
+      db.appointments
+        .filter(item => {
+          if (item.hospital_id) {
+            return (
+              item.hospital_id ===
+              req.user.hospital_id
+            );
+          }
+
+          return (
+            clean(item.hospital_name)
+              .toLowerCase() ===
+            clean(req.user.hospital_name)
+              .toLowerCase()
+          );
+        })
+        .sort((a, b) =>
+          Number(a.op_number) -
+          Number(b.op_number)
+        );
+
+    return res.json(list);
+  }
+);
+
+/* =====================================================
+   PATIENT HELP MESSAGE
+===================================================== */
+
+app.post(
+  "/api/messages",
+  auth,
+  roleOnly("patient"),
+  (req, res) => {
+    const {
+      hospital_name,
+      message,
+      case_id
+    } = req.body;
+
+    if (!clean(message)) {
+      return res.status(400).json({
+        error: "Please enter a message"
+      });
+    }
+
+    let hospitalName =
+      clean(hospital_name);
+
+    let hospitalId = "";
+
+    if (case_id) {
+      const item = db.cases.find(
+        x =>
+          x.id === Number(case_id) &&
+          x.patient_id === req.user.unique_id
+      );
+
+      if (!item) {
+        return res.status(404).json({
+          error: "Registration not found"
+        });
+      }
+
+      hospitalName = item.hospital_name;
+      hospitalId = item.hospital_id;
+    }
+
+    if (!hospitalName) {
+      return res.status(400).json({
+        error: "Hospital name is required"
+      });
+    }
+
+    const messageItem = {
+      id: nextId(db.messages),
+
+      patient_id:
+        req.user.unique_id,
+
+      username:
+        req.user.username,
+
+      unique_id:
+        req.user.unique_id,
+
+      hospital_name:
+        hospitalName,
+
+      hospital_id:
+        hospitalId,
+
+      case_id:
+        case_id
+          ? Number(case_id)
+          : null,
+
       message:
-        "Patient transferred to doctor queue",
+        clean(message),
+
+      created_at:
+        now()
+    };
+
+    db.messages.push(messageItem);
+
+    saveDB();
+
+    return res.status(201).json({
+      success: true
+    });
+  }
+);
+
+/* =====================================================
+   NURSE MESSAGES
+===================================================== */
+
+app.get(
+  "/api/messages",
+  auth,
+  roleOnly("nurse"),
+  (req, res) => {
+    const list =
+      db.messages
+        .filter(message => {
+          if (message.hospital_id) {
+            return (
+              message.hospital_id ===
+              req.user.hospital_id
+            );
+          }
+
+          return (
+            clean(message.hospital_name)
+              .toLowerCase() ===
+            clean(req.user.hospital_name)
+              .toLowerCase()
+          );
+        })
+        .sort((a, b) =>
+          new Date(b.created_at) -
+          new Date(a.created_at)
+        );
+
+    return res.json(list);
+  }
+);
+
+/* =====================================================
+   DOCTOR QUEUES
+===================================================== */
+
+app.get(
+  "/api/doctor/queue",
+  auth,
+  roleOnly("doctor"),
+  (req, res) => {
+    const type =
+      req.query.type || "high";
+
+    let list =
+      db.cases.filter(item => {
+        const sameHospital =
+          item.hospital_id
+            ? item.hospital_id === req.user.hospital_id
+            : clean(item.hospital_name)
+                .toLowerCase() ===
+              clean(req.user.hospital_name)
+                .toLowerCase();
+
+        if (!sameHospital) return false;
+
+        if (
+          ["completed", "admitted"].includes(
+            item.status
+          )
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+
+    if (type === "high") {
+      list = list.filter(
+        item =>
+          item.risk_level === "HIGH"
+      );
+    } else {
+      list = list.filter(
+        item =>
+          item.risk_level !== "HIGH"
+      );
+    }
+
+    list.sort((a, b) => {
+      const priority = {
+        HIGH: 1,
+        MEDIUM: 2,
+        LOW: 3
+      };
+
+      const riskCompare =
+        (priority[a.risk_level] || 4) -
+        (priority[b.risk_level] || 4);
+
+      if (riskCompare !== 0) {
+        return riskCompare;
+      }
+
+      return (
+        new Date(a.created_at) -
+        new Date(b.created_at)
+      );
+    });
+
+    return res.json(list);
+  }
+);
+
+/* =====================================================
+   DOCTOR STATUS / NOTES / MEDICAL SLIP
+===================================================== */
+
+app.post(
+  "/api/cases/:id/status",
+  auth,
+  roleOnly("doctor"),
+  (req, res) => {
+    const item = db.cases.find(
+      x =>
+        x.id === Number(req.params.id)
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Patient not found"
+      });
+    }
+
+    const allowed = [
+      "under_review",
+      "completed",
+      "admitted",
+      "follow_up"
+    ];
+
+    if (!allowed.includes(req.body.status)) {
+      return res.status(400).json({
+        error: "Invalid patient status"
+      });
+    }
+
+    item.status =
+      req.body.status;
+
+    item.doctor_notes =
+      clean(req.body.doctor_notes);
+
+    item.medical_slip =
+      clean(req.body.medical_slip);
+
+    item.updated_at =
+      now();
+
+    saveDB();
+
+    return res.json({
+      success: true,
       case: item
     });
   }
 );
 
-/* =========================================================
-   APPOINTMENTS / OP
-   ========================================================= */
-
-app.post(
-  "/api/appointments",
-  requireAuth,
-  requireRole("patient"),
-  (req, res) => {
-    try {
-      const {
-        hospital_name,
-        hospital_id,
-        appointment_date,
-        appointment_time
-      } = req.body;
-
-      if (
-        !hospital_name ||
-        !appointment_date ||
-        !appointment_time
-      ) {
-        return res.status(400).json({
-          error:
-            "Hospital name, date and time are required"
-        });
-      }
-
-      const hospitalId =
-        cleanHospitalId(hospital_id || "");
-
-      const previous = appointments
-        .filter(
-          (item) =>
-            item.status !== "completed" &&
-            item.appointment_date ===
-              appointment_date &&
-            (
-              item.hospital_id === hospitalId ||
-              (
-                !hospitalId &&
-                item.hospital_name
-                  .toLowerCase() ===
-                  hospital_name
-                    .toLowerCase()
-              )
-            )
-        )
-        .sort(
-          (a, b) =>
-            a.op_number - b.op_number
-        );
-
-      const patientsBefore =
-        previous.length;
-
-      const totalMinutes =
-        previous.reduce(
-          (total, appointment) =>
-            total +
-            calculateRiskMinutes(
-              appointment.risk_level
-            ),
-          0
-        );
-
-      const requestedDateTime =
-        new Date(
-          `${appointment_date}T${appointment_time}`
-        );
-
-      const estimatedDateTime =
-        new Date(
-          requestedDateTime.getTime() +
-          totalMinutes * 60000
-        );
-
-      const maxOp =
-        appointments
-          .filter(
-            (item) =>
-              item.appointment_date ===
-                appointment_date &&
-              (
-                item.hospital_id ===
-                  hospitalId ||
-                (
-                  !hospitalId &&
-                  item.hospital_name
-                    .toLowerCase() ===
-                    hospital_name
-                      .toLowerCase()
-                )
-              )
-          )
-          .reduce(
-            (max, item) =>
-              Math.max(max, item.op_number),
-            0
-          );
-
-      const appointment = {
-        id: nextAppointmentId++,
-        patient_id: req.user.unique_id,
-        patient_name: req.user.username,
-        hospital_name:
-          String(hospital_name).trim(),
-        hospital_id: hospitalId,
-        appointment_date,
-        requested_time: appointment_time,
-        estimated_time:
-          estimatedDateTime.toISOString(),
-        patients_before:
-          patientsBefore,
-        op_number: maxOp + 1,
-        risk_level: null,
-        status: "remaining",
-        created_at: now(),
-        updated_at: now()
-      };
-
-      appointments.push(appointment);
-
-      res.status(201).json({
-        ...appointment,
-        disclaimer:
-          "This time is only an estimate and may change depending on patient condition, priority cases and hospital workload."
-      });
-
-    } catch (error) {
-      console.error(
-        "APPOINTMENT ERROR:",
-        error
-      );
-
-      res.status(500).json({
-        error:
-          "Could not create appointment"
-      });
-    }
-  }
-);
-
-
-app.get(
-  "/api/appointments/my",
-  requireAuth,
-  requireRole("patient"),
-  (req, res) => {
-    const result = appointments
-      .filter(
-        (item) =>
-          item.patient_id === req.user.unique_id
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.created_at) -
-          new Date(a.created_at)
-      );
-
-    res.json(result);
-  }
-);
-
-
-app.get(
-  "/api/appointments",
-  requireAuth,
-  requireRole("nurse", "doctor"),
-  (req, res) => {
-    const result = appointments
-      .filter(
-        (item) =>
-          item.hospital_id ===
-            req.user.hospital_id ||
-          (
-            !item.hospital_id &&
-            item.hospital_name
-              .toLowerCase() ===
-              req.user.hospital_name
-                .toLowerCase()
-          )
-      )
-      .sort(
-        (a, b) =>
-          a.op_number - b.op_number
-      );
-
-    res.json(result);
-  }
-);
-
-
-app.post(
-  "/api/appointments/:id/status",
-  requireAuth,
-  requireRole("nurse", "doctor"),
-  (req, res) => {
-    const item = appointments.find(
-      (appointment) =>
-        appointment.id === Number(req.params.id)
-    );
-
-    if (!item) {
-      return res.status(404).json({
-        error: "OP not found"
-      });
-    }
-
-    const {
-      status,
-      risk_level
-    } = req.body;
-
-    if (status) {
-      item.status = status;
-    }
-
-    if (risk_level) {
-      item.risk_level = risk_level;
-    }
-
-    item.updated_at = now();
-
-    res.json(item);
-  }
-);
-
-/* =========================================================
-   DOCTOR QUEUES
-   ========================================================= */
-
-app.get(
-  "/api/doctor/high-queue",
-  requireAuth,
-  requireRole("doctor"),
-  (req, res) => {
-    const result = cases
-      .filter(
-        (item) =>
-          item.transferred_to_doctor &&
-          item.risk_level === "HIGH" &&
-          item.hospital_id ===
-            req.user.hospital_id
-      )
-      .sort(
-        (a, b) =>
-          new Date(a.updated_at) -
-          new Date(b.updated_at)
-      );
-
-    res.json(result);
-  }
-);
-
-
-app.get(
-  "/api/doctor/normal-queue",
-  requireAuth,
-  requireRole("doctor"),
-  (req, res) => {
-    const result = cases
-      .filter(
-        (item) =>
-          item.transferred_to_doctor &&
-          item.risk_level !== "HIGH" &&
-          item.hospital_id ===
-            req.user.hospital_id
-      )
-      .sort(sortRisk);
-
-    res.json(result);
-  }
-);
-
-
-/* =========================================================
-   DOCTOR CASE STATUS / NOTES
-   ========================================================= */
-
-app.post(
-  "/api/cases/:id/status",
-  requireAuth,
-  requireRole("doctor"),
-  (req, res) => {
-    const item = cases.find(
-      (caseItem) =>
-        caseItem.id === Number(req.params.id)
-    );
-
-    if (!item) {
-      return res.status(404).json({
-        error: "Patient not found"
-      });
-    }
-
-    const {
-      status,
-      notes
-    } = req.body;
-
-    if (status) {
-      item.status = status;
-    }
-
-    if (notes !== undefined) {
-      item.doctor_notes =
-        String(notes);
-    }
-
-    item.updated_at = now();
-
-    res.json(item);
-  }
-);
-
-/* =========================================================
-   DOCTOR MEDICAL SLIPS / DOCUMENTS
-   ========================================================= */
-
-app.post(
-  "/api/documents",
-  requireAuth,
-  requireRole("doctor"),
-  (req, res) => {
-    try {
-      const {
-        patient_id,
-        title,
-        type,
-        content
-      } = req.body;
-
-      if (
-        !patient_id ||
-        !title ||
-        !content
-      ) {
-        return res.status(400).json({
-          error:
-            "Patient ID, title and content are required"
-        });
-      }
-
-      const document = {
-        id: nextDocumentId++,
-        patient_id:
-          String(patient_id).trim(),
-        doctor_id:
-          req.user.unique_id,
-        doctor_name:
-          req.user.username,
-        hospital_name:
-          req.user.hospital_name,
-        hospital_id:
-          req.user.hospital_id,
-        title: String(title).trim(),
-        type:
-          type || "medical_slip",
-        content:
-          String(content).trim(),
-        created_at: now()
-      };
-
-      documents.push(document);
-
-      res.status(201).json(document);
-
-    } catch (error) {
-      console.error(
-        "DOCUMENT ERROR:",
-        error
-      );
-
-      res.status(500).json({
-        error:
-          "Could not save document"
-      });
-    }
-  }
-);
-
-
-app.get(
-  "/api/documents/my",
-  requireAuth,
-  requireRole("patient"),
-  (req, res) => {
-    const result = documents.filter(
-      (item) =>
-        item.patient_id ===
-          req.user.unique_id
-    );
-
-    res.json(result);
-  }
-);
-
-/* =========================================================
-   MESSAGES / HELP
-   ========================================================= */
-
-app.post(
-  "/api/messages",
-  requireAuth,
-  requireRole("patient"),
-  (req, res) => {
-    const {
-      hospital_name,
-      hospital_id,
-      message,
-      case_id
-    } = req.body;
-
-    if (
-      !hospital_name ||
-      !message
-    ) {
-      return res.status(400).json({
-        error:
-          "Hospital name and message are required"
-      });
-    }
-
-    const item = {
-      id: nextMessageId++,
-      patient_id:
-        req.user.unique_id,
-      username:
-        req.user.username,
-      hospital_name:
-        String(hospital_name).trim(),
-      hospital_id:
-        cleanHospitalId(
-          hospital_id || ""
-        ),
-      case_id:
-        case_id || null,
-      message:
-        String(message).trim(),
-      created_at: now()
-    };
-
-    messages.push(item);
-
-    res.status(201).json(item);
-  }
-);
-
-
-app.get(
-  "/api/messages",
-  requireAuth,
-  requireRole("nurse"),
-  (req, res) => {
-    const result = messages.filter(
-      (item) =>
-        item.hospital_id ===
-          req.user.hospital_id ||
-        (
-          !item.hospital_id &&
-          item.hospital_name
-            .toLowerCase() ===
-            req.user.hospital_name
-              .toLowerCase()
-        )
-    );
-
-    res.json(result);
-  }
-);
-
-/* =========================================================
-   HISTORY
-   ========================================================= */
-
-app.get(
-  "/api/history",
-  requireAuth,
-  (req, res) => {
-    if (
-      req.user.role === "patient"
-    ) {
-      const registrations =
-        cases
-          .filter(
-            (item) =>
-              item.patient_id ===
-                req.user.unique_id
-          )
-          .map((item) => ({
-            ...item,
-            history_type:
-              "registration"
-          }));
-
-      const ops =
-        appointments
-          .filter(
-            (item) =>
-              item.patient_id ===
-                req.user.unique_id
-          )
-          .map((item) => ({
-            ...item,
-            history_type:
-              "appointment"
-          }));
-
-      const combined =
-        [...registrations, ...ops]
-          .sort(
-            (a, b) =>
-              new Date(
-                b.created_at
-              ) -
-              new Date(
-                a.created_at
-              )
-          );
-
-      return res.json(combined);
-    }
-
-    const result = cases
-      .filter(
-        (item) =>
-          item.hospital_id ===
-            req.user.hospital_id ||
-          (
-            !item.hospital_id &&
-            item.hospital_name
-              .toLowerCase() ===
-              req.user.hospital_name
-                .toLowerCase()
-          )
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.updated_at) -
-          new Date(a.updated_at)
-      );
-
-    res.json(result);
-  }
-);
-
-/* =========================================================
-   HOSPITAL RISK SETTINGS
-   ========================================================= */
+/* =====================================================
+   HOSPITAL SETTINGS
+===================================================== */
 
 app.get(
   "/api/settings",
-  requireAuth,
-  requireRole("doctor"),
+  auth,
+  roleOnly("doctor"),
   (req, res) => {
-    const key = hospitalKey(
-      req.user.hospital_name,
-      req.user.hospital_id
-    );
+    const hospitalId =
+      req.user.hospital_id;
 
-    if (!hospitalSettingsStore[key]) {
-      hospitalSettingsStore[key] = {
+    const settings =
+      db.settings[hospitalId] || {
         low_max: 4,
         medium_max: 6,
         medium_review_minutes: 30
       };
-    }
 
-    res.json(
-      hospitalSettingsStore[key]
-    );
+    return res.json(settings);
   }
 );
 
-
 app.put(
   "/api/settings",
-  requireAuth,
-  requireRole("doctor"),
+  auth,
+  roleOnly("doctor"),
   (req, res) => {
     const {
       low_max,
@@ -1358,64 +1344,102 @@ app.put(
       medium_review_minutes
     } = req.body;
 
+    const low = Number(low_max);
+    const medium = Number(medium_max);
+    const minutes =
+      Number(medium_review_minutes);
+
     if (
-      Number(low_max) >
-      Number(medium_max)
+      !Number.isFinite(low) ||
+      !Number.isFinite(medium) ||
+      !Number.isFinite(minutes)
     ) {
       return res.status(400).json({
-        error:
-          "Low maximum cannot be greater than Medium maximum"
+        error: "Please enter valid numbers"
       });
     }
 
-    const key = hospitalKey(
-      req.user.hospital_name,
-      req.user.hospital_id
-    );
+    if (
+      low < 0 ||
+      medium < low ||
+      minutes < 1
+    ) {
+      return res.status(400).json({
+        error: "Please check the risk settings"
+      });
+    }
 
-    hospitalSettingsStore[key] = {
-      low_max:
-        Number(low_max),
-      medium_max:
-        Number(medium_max),
-      medium_review_minutes:
-        Number(
-          medium_review_minutes
-        )
+    db.settings[
+      req.user.hospital_id
+    ] = {
+      low_max: low,
+      medium_max: medium,
+      medium_review_minutes: minutes
     };
 
-    res.json(
-      hospitalSettingsStore[key]
-    );
+    saveDB();
+
+    return res.json({
+      success: true
+    });
   }
 );
 
-/* =========================================================
-   FRONTEND
-   THIS MUST STAY LAST
-   ========================================================= */
+/* =====================================================
+   HISTORY FOR NURSES AND DOCTORS
+===================================================== */
 
-app.use(express.static(__dirname));
+app.get(
+  "/api/history",
+  auth,
+  roleOnly("nurse", "doctor"),
+  (req, res) => {
+    const list =
+      db.cases
+        .filter(item => {
+          if (item.hospital_id) {
+            return (
+              item.hospital_id ===
+              req.user.hospital_id
+            );
+          }
+
+          return (
+            clean(item.hospital_name)
+              .toLowerCase() ===
+            clean(req.user.hospital_name)
+              .toLowerCase()
+          );
+        })
+        .sort((a, b) =>
+          new Date(b.updated_at) -
+          new Date(a.updated_at)
+        );
+
+    return res.json(list);
+  }
+);
+
+/* =====================================================
+   SERVE FRONTEND
+===================================================== */
 
 app.get("*", (req, res) => {
   res.sendFile(
     path.join(
       __dirname,
+      "public",
       "index.html"
     )
   );
 });
 
-/* =========================================================
+/* =====================================================
    START SERVER
-   ========================================================= */
+===================================================== */
 
-app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log(
-      `QTA running on port ${PORT}`
-    );
-  }
-);
+app.listen(PORT, () => {
+  console.log(
+    `QTA server running on port ${PORT}`
+  );
+});
