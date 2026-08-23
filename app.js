@@ -1,25 +1,30 @@
 const A=document.getElementById("app"),B=document.getElementById("bar");let token=localStorage.qtaToken||"",u=JSON.parse(localStorage.qtaUser||"null");const $=id=>document.getElementById(id),toast=x=>{$("toast").textContent=x;$("toast").style.display="block";setTimeout(()=>$("toast").style.display="none",3000)};
 async function api(url, o = {}) {
   const r = await fetch(url, {
+    ...o,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: "Bearer " + token } : {})
-    },
-    ...o
+      ...(token
+        ? { Authorization: "Bearer " + token }
+        : {}),
+      ...(o.headers || {})
+    }
   });
 
   const text = await r.text();
 
   let d;
+
   try {
     d = JSON.parse(text);
   } catch (e) {
-    console.error("Server returned:", text);
-    throw new Error("Server error: API returned HTML instead of JSON");
+    throw Error(
+      "Server error: API returned HTML instead of JSON"
+    );
   }
 
   if (!r.ok) {
-    throw new Error(d.error || "Request failed");
+    throw Error(d.error || "Request failed");
   }
 
   return d;
